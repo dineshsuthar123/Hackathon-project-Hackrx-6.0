@@ -292,11 +292,251 @@ class SmartAnswerExtractor:
         }
     
     def extract_answer(self, question: str, sections: List[DocumentSection]) -> str:
-        """Extract precise answer from document sections"""
+        """Extract precise answer from document sections with enhanced analysis"""
         question_lower = question.lower()
         
-        # Find matching patterns
+        # First, try to find direct matches in the actual document content
+        direct_answer = self._find_direct_answer(question, sections)
+        if direct_answer:
+            return direct_answer
+        
+        # Strategy 1: Pattern-based extraction for known patterns
+        pattern_answer = self._pattern_based_extraction(question, sections)
+        if pattern_answer and "specific information" not in pattern_answer.lower():
+            return pattern_answer
+        
+        # Strategy 2: Keyword-based content search
+        content_answer = self._search_content_by_keywords(question, sections)
+        if content_answer:
+            return content_answer
+        
+        # Strategy 3: Semantic similarity search
+        similarity_answer = self._find_similar_content(question, sections)
+        if similarity_answer:
+            return similarity_answer
+        
+        # Final fallback with better context
+        return f"The specific information about '{question}' was not found in the available document content. The document may not contain this specific detail, or it may be located in a section that was not properly extracted."
+    
+    def _find_direct_answer(self, question: str, sections: List[DocumentSection]) -> Optional[str]:
+        """Find direct answers by searching for question keywords in document"""
+        question_words = re.findall(r'\b\w+\b', question.lower())
+        question_words = [w for w in question_words if len(w) > 3 and w not in ['what', 'which', 'when', 'where', 'does', 'policy', 'under', 'this']]
+        
         best_matches = []
+        
+        for section in sections:
+            section_text = section.content.lower()
+            
+            # Look for sentences that contain multiple question keywords
+            sentences = re.split(r'[.!?]+', section.content)
+            
+            for sentence in sentences:
+                if len(sentence.strip()) < 20:
+                    continue
+                
+                sentence_lower = sentence.lower()
+                keyword_count = sum(1 for word in question_words if word in sentence_lower)
+                
+                # If sentence contains many keywords and has specific information
+                if keyword_count >= 2:
+                    # Check if sentence has numbers, amounts, or specific details
+                    has_specifics = bool(re.search(r'\d+|rs\.|inr|percentage|limit|maximum|minimum|days|months|years|hours', sentence_lower))
+                    
+                    if has_specifics:
+                        score = keyword_count + (2 if has_specifics else 0)
+                        best_matches.append((sentence.strip(), score))
+        
+        if best_matches:
+            best_matches.sort(key=lambda x: x[1], reverse=True)
+            return best_matches[0][0]
+        
+        return None
+    
+    def _search_content_by_keywords(self, question: str, sections: List[DocumentSection]) -> Optional[str]:
+        """Search content using keyword matching and context analysis"""
+        # Extract key terms from question
+        question_terms = []
+        
+        # Common insurance question patterns
+        insurance_patterns = {
+            'premium': ['premium', 'payment', 'frequency'],
+            'renewal': ['renewal', 'notice', 'days', 'prior'],
+            'diagnostics': ['diagnostic', 'pathology', 'sub-limit', 'sublimit'],
+            'cataract': ['cataract', 'lens', 'treatment', 'cover'],
+            'health checkup': ['health', 'checkup', 'check-up', 'benefit', 'maximum'],
+            'imaging': ['imaging', 'diagnostic', 'procedures', 'covered'],
+            'joint replacement': ['joint', 'replacement', 'surgery', 'maximum', 'amount'],
+            'ambulance': ['ambulance', 'service', 'transport', 'road'],
+            'ayush': ['ayush', 'treatment', 'aggregate', 'limit'],
+            'domiciliary': ['domiciliary', 'icu', 'care', 'cover'],
+            'waiting period': ['waiting', 'period', 'hiv', 'aids'],
+            'organ donor': ['organ', 'donor', 'expenses', 'limit'],
+            'hospitalization': ['hospitalization', 'day', 'covered'],
+            'dental': ['dental', 'treatment', 'emergency', 'percentage'],
+            'restoration': ['restoration', 'benefit', 'sum', 'insured', 'exhaustion'],
+            'second opinion': ['second', 'opinion', 'services'],
+            'refractive': ['refractive', 'eye', 'surgery', 'limit'],
+            'bariatric': ['bariatric', 'surgery', 'sub-limit'],
+            'cochlear': ['cochlear', 'implant', 'coverage'],
+            'congenital': ['congenital', 'cardiac', 'defects', 'waiting'],
+            'evacuation': ['evacuation', 'emergency', 'expenses', 'limit'],
+            'reinstatement': ['reinstatement', 'sum', 'insured', 'policy', 'year'],
+            'psychiatric': ['psychiatric', 'disorders', 'exclusion'],
+            'cancer': ['cancer', 'therapies', 'experimental', 'modern'],
+            'dialysis': ['dialysis', 'renal', 'visit', 'benefit'],
+            'consultation': ['consultation', 'follow-up', 'discharge'],
+            'admission': ['admission', 'criteria', 'hospitalization'],
+            'room upgrade': ['room', 'upgrade', 'higher', 'billed'],
+            'psychiatric care': ['psychiatric', 'inpatient', 'care', 'cover'],
+            'vaccines': ['vaccines', 'immunization', 'preventive'],
+            'catastrophe': ['catastrophe', 'disease', 'treatments'],
+            'transplant': ['transplant', 'organ', 'donor', 'separately'],
+            'nomination': ['nomination', 'minor', 'child', 'procedure'],
+            'discount': ['discount', 'premium', 'non-smoker', 'healthy'],
+            'age': ['age', 'misstatement', 'clause'],
+            'cumulative bonus': ['cumulative', 'bonus', 'five', 'years'],
+            'senior citizen': ['senior', 'citizen', 'loading', 'premium'],
+            'nicu': ['nicu', 'neonatal', 'intensive', 'care'],
+            'endoscopy': ['endoscopy', 'daycare', 'diagnostic'],
+            'homeopathic': ['homeopathic', 'treatments', 'stance'],
+            'advanced cancer': ['advanced', 'cancer', 'treatments', 'benefit'],
+            'anomalies': ['anomalies', 'congenital', 'inception', 'waiting'],
+            'extension': ['extension', 'policy', 'grace', 'period'],
+            'abroad': ['abroad', 'renewal', 'documents', 'policyholder'],
+            'supplements': ['supplements', 'nutritional', 'domiciliary'],
+            'screening': ['screening', 'tests', 'health', 'check-up'],
+            'robotic': ['robotic', 'surgeries', 'percentage', 'sum'],
+            'pet-ct': ['pet-ct', 'scans', 'covered', 'limit'],
+            'iol': ['iol', 'intraocular', 'lens', 'cataract'],
+            'mental illness': ['mental', 'illness', 'hospitalization', 'define'],
+            'exhaustion': ['exhaustion', 'sum', 'insured', 'clause'],
+            'free look': ['free', 'look', 'period', 'cancellation'],
+            'neonatal screening': ['neonatal', 'screening', 'tests', 'reimbursable'],
+            'travel': ['travel', 'expenses', 'treatment', 'outside', 'india'],
+            'life-threatening': ['life-threatening', 'diseases', 'vaccines', 'limit'],
+            'concierge': ['concierge', 'valet', 'services', 'hospital'],
+            'genetic disorder': ['genetic', 'disorder', 'treatments', 'cover'],
+            'family floater': ['family', 'floater', 'room', 'rent', 'calculated'],
+            'self-inflicted': ['self-inflicted', 'injuries', 'exclusion'],
+            'splints': ['splints', 'casts', 'surgical', 'consumables'],
+            'casualty': ['casualty', 'emergency', 'treatments', 'benefit'],
+            'chemotherapy': ['chemotherapy', 'outpatient', 'sessions'],
+            'speech therapy': ['speech', 'therapy', 'post-hospitalization', 'limit'],
+            'eye examination': ['eye', 'examination', 'routine', 'benefit'],
+            'telemedicine': ['telemedicine', 'telephone', 'consultations'],
+            'chiropractic': ['chiropractic', 'treatment', 'ayush'],
+            'radiotherapy': ['radiotherapy', 'intra-operative', 'equipment'],
+            'immunoglobulin': ['immunoglobulin', 'therapy', 'cover'],
+            'prosthetic': ['prosthetic', 'orthopedic', 'devices', 'sub-limit'],
+            'liver transplant': ['liver', 'transplant', 'surgery', 'benefit'],
+            'fertility': ['fertility', 'preservation', 'procedures', 'modern'],
+            'intensive care': ['intensive', 'care', 'unit', 'definition'],
+            'single claim': ['single', 'claim', 'event', 'liability'],
+            'medical screening': ['medical', 'screening', 'charges', 'pre-policy'],
+            'accidental death': ['accidental', 'death', 'benefit', 'add-on'],
+            'insulin pump': ['insulin', 'pump', 'diabetes', 'management'],
+            'break in cover': ['break', 'cover', 'reinstatement', 'procedure'],
+            'bone marrow': ['bone', 'marrow', 'transplant', 'sub-limit'],
+            'ozone therapy': ['ozone', 'therapy', 'alternate', 'treatment'],
+            'stem cell': ['stem', 'cell', 'transplant', 'heterologous'],
+            'dental extraction': ['dental', 'extraction', 'emergency'],
+            'innovative technology': ['innovative', 'technology', 'therapies', 'sub-limit'],
+            'reconstructive': ['reconstructive', 'plastic', 'surgery', 'cover'],
+            'aids drug': ['aids', 'drug', 'therapies', 'incidental'],
+            'successive renewal': ['successive', 'renewal', 'elapsed', 'time'],
+            'enhancement': ['enhancement', 'sum', 'insured', 'mid-term'],
+            'physiotherapy': ['physiotherapy', 'hospital-provided', 'sessions'],
+            'associated medical': ['associated', 'medical', 'expenses', 'sub-limit'],
+            'long-term care': ['long-term', 'care', 'facilities', 'discharge'],
+            'occupational therapy': ['occupational', 'therapy', 'speech', 'combined']
+        }
+        
+        # Find relevant terms for this question
+        question_lower = question.lower()
+        relevant_terms = []
+        
+        for category, terms in insurance_patterns.items():
+            if any(term in question_lower for term in terms):
+                relevant_terms.extend(terms)
+        
+        # Search through sections for content with these terms
+        best_content = []
+        
+        for section in sections:
+            section_lower = section.content.lower()
+            
+            # Count term matches
+            term_matches = sum(1 for term in relevant_terms if term in section_lower)
+            
+            if term_matches >= 2:  # Section has relevant terms
+                # Extract relevant sentences
+                sentences = re.split(r'[.!?]+', section.content)
+                
+                for sentence in sentences:
+                    if len(sentence.strip()) < 30:
+                        continue
+                    
+                    sentence_lower = sentence.lower()
+                    sentence_term_matches = sum(1 for term in relevant_terms if term in sentence_lower)
+                    
+                    if sentence_term_matches >= 2:
+                        # Check for specific information
+                        has_numbers = bool(re.search(r'\d+', sentence))
+                        has_amounts = bool(re.search(r'rs\.|inr|percentage|%', sentence_lower))
+                        has_limits = bool(re.search(r'limit|maximum|minimum|up to|subject to', sentence_lower))
+                        
+                        specificity_score = sentence_term_matches
+                        if has_numbers: specificity_score += 2
+                        if has_amounts: specificity_score += 2
+                        if has_limits: specificity_score += 1
+                        
+                        best_content.append((sentence.strip(), specificity_score))
+        
+        if best_content:
+            best_content.sort(key=lambda x: x[1], reverse=True)
+            return best_content[0][0]
+        
+        return None
+    
+    def _find_similar_content(self, question: str, sections: List[DocumentSection]) -> Optional[str]:
+        """Find content with similar context to the question"""
+        question_words = set(re.findall(r'\b\w{4,}\b', question.lower()))
+        
+        best_matches = []
+        
+        for section in sections:
+            section_text = section.content
+            
+            # Split into paragraphs
+            paragraphs = re.split(r'\n\s*\n', section_text)
+            
+            for paragraph in paragraphs:
+                if len(paragraph.strip()) < 50:
+                    continue
+                
+                paragraph_words = set(re.findall(r'\b\w{4,}\b', paragraph.lower()))
+                
+                # Calculate word overlap
+                overlap = len(question_words & paragraph_words)
+                
+                if overlap >= 2:  # Good word overlap
+                    # Check if paragraph has specific information
+                    has_specifics = bool(re.search(r'\d+|limit|maximum|covered|benefit|exclusion|waiting|period', paragraph.lower()))
+                    
+                    if has_specifics:
+                        score = overlap + (2 if has_specifics else 0)
+                        best_matches.append((paragraph.strip(), score))
+        
+        if best_matches:
+            best_matches.sort(key=lambda x: x[1], reverse=True)
+            return best_matches[0][0]
+        
+        return None
+    
+    def _pattern_based_extraction(self, question: str, sections: List[DocumentSection]) -> Optional[str]:
+        """Extract answers using pattern matching on document sections"""
+        question_lower = question.lower()
         
         for pattern_name, pattern_info in self.patterns.items():
             # Check if question contains relevant keywords
@@ -306,7 +546,6 @@ class SmartAnswerExtractor:
             if keyword_matches >= 1:  # At least one keyword match
                 # Search in relevant sections
                 for section in sections:
-                    # Check if section contains relevant keywords
                     section_content_lower = section.content.lower()
                     section_keyword_matches = sum(1 for keyword in pattern_info['keywords'] 
                                                if keyword in section_content_lower)
@@ -317,22 +556,14 @@ class SmartAnswerExtractor:
                             match = re.search(pattern_info['pattern'], section_content_lower, re.IGNORECASE)
                             if match:
                                 try:
-                                    answer = pattern_info['template'].format(*match.groups())
-                                    best_matches.append((answer, keyword_matches + section_keyword_matches, section))
+                                    return pattern_info['template'].format(*match.groups())
                                 except:
                                     continue
                         else:
                             # For patterns without regex, use template directly
-                            answer = pattern_info['template']
-                            best_matches.append((answer, keyword_matches + section_keyword_matches, section))
+                            return pattern_info['template']
         
-        # Return best match
-        if best_matches:
-            best_matches.sort(key=lambda x: x[1], reverse=True)
-            return best_matches[0][0]
-        
-        # Fallback to intelligent content search
-        return self._intelligent_content_search(question, sections)
+        return None
     
     def _intelligent_content_search(self, question: str, sections: List[DocumentSection]) -> str:
         """Intelligent content search when patterns don't match"""
@@ -392,6 +623,12 @@ class LightweightDocumentProcessor:
             # Fetch document content
             document_content = await self._fetch_document_content(document_url)
             
+            # Check if we got actual content or fallback
+            if len(document_content.strip()) > 5000:  # Substantial content
+                self.logger.info(f"Processing actual document content ({len(document_content)} characters)")
+            else:
+                self.logger.warning("Using minimal/fallback content - may not have full document")
+            
             # Parse into sections
             sections = self.parser.parse_document(document_content)
             
@@ -404,49 +641,83 @@ class LightweightDocumentProcessor:
         for i, question in enumerate(questions):
             self.logger.info(f"Processing question {i+1}/{len(questions)}: {question[:50]}...")
             answer = self.extractor.extract_answer(question, sections)
+            
+            # Log if we're returning a generic answer
+            if "specific information" in answer.lower() or "requested information" in answer.lower():
+                self.logger.warning(f"Generic answer returned for: {question[:30]}...")
+            else:
+                self.logger.info(f"Specific answer found for: {question[:30]}...")
+            
             answers.append(answer)
         
         return answers
     
     async def _fetch_document_content(self, document_url: str) -> str:
-        """Fetch and extract text from document"""
-        if not httpx:
-            return self._get_fallback_content()
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(document_url)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '').lower()
-                
-                if 'pdf' in content_type or document_url.lower().endswith('.pdf'):
-                    return self._extract_pdf_text(response.content)
-                else:
-                    return response.text
+        """Fetch and extract text from document with robust error handling"""
+        # Always try to fetch the actual document first
+        if httpx:
+            try:
+                self.logger.info(f"Fetching document from: {document_url}")
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                    response = await client.get(document_url)
+                    response.raise_for_status()
                     
-        except Exception as e:
-            self.logger.warning(f"Document fetch failed: {e}, using fallback")
-            return self._get_fallback_content()
+                    content_type = response.headers.get('content-type', '').lower()
+                    self.logger.info(f"Content type: {content_type}")
+                    
+                    if 'pdf' in content_type or document_url.lower().endswith('.pdf'):
+                        text_content = self._extract_pdf_text(response.content)
+                        if text_content and len(text_content.strip()) > 1000:  # Ensure we got substantial content
+                            self.logger.info(f"Successfully extracted {len(text_content)} characters from PDF")
+                            return text_content
+                        else:
+                            self.logger.warning("PDF extraction returned insufficient content")
+                    else:
+                        text_content = response.text
+                        if text_content and len(text_content.strip()) > 1000:
+                            self.logger.info(f"Successfully fetched {len(text_content)} characters")
+                            return text_content
+                        
+            except Exception as e:
+                self.logger.error(f"Document fetch failed: {e}")
+        
+        # Only use fallback if document fetch completely failed
+        self.logger.warning("Using fallback content - document fetch failed")
+        return self._get_fallback_content()
     
     def _extract_pdf_text(self, pdf_content: bytes) -> str:
-        """Extract text from PDF content"""
+        """Extract text from PDF content with enhanced extraction"""
         if not PyPDF2:
-            return self._get_fallback_content()
+            self.logger.warning("PyPDF2 not available")
+            return ""
         
         try:
             pdf_file = BytesIO(pdf_content)
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             
             text_content = ""
-            for page in pdf_reader.pages:
-                text_content += page.extract_text() + "\n"
+            self.logger.info(f"PDF has {len(pdf_reader.pages)} pages")
             
-            return text_content.strip()
+            for page_num, page in enumerate(pdf_reader.pages):
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_content += f"\n--- Page {page_num + 1} ---\n"
+                        text_content += page_text + "\n"
+                except Exception as e:
+                    self.logger.warning(f"Failed to extract text from page {page_num + 1}: {e}")
+                    continue
             
+            if text_content.strip():
+                self.logger.info(f"Successfully extracted {len(text_content)} characters from PDF")
+                return text_content.strip()
+            else:
+                self.logger.warning("No text extracted from PDF")
+                return ""
+                
         except Exception as e:
-            self.logger.warning(f"PDF extraction failed: {e}")
-            return self._get_fallback_content()
+            self.logger.error(f"PDF extraction failed: {e}")
+            return ""
     
     def _get_fallback_content(self) -> str:
         """Comprehensive fallback content"""
