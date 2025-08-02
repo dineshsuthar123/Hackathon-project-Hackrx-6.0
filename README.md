@@ -2,21 +2,21 @@
 
 <div align="center">
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT4-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-[![HackRx](https://img.shields.io/badge/HackRx-6.0-ff6b35?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMSA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDMgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K)](https://hackrx.in)
+[![HackRx](https://img.shields.io/badge/HackRx-6.0-ff6b35?style=for-the-badge)](https://hackrx.in)
 
 **🏆 Advanced Document Analysis System for Insurance, Legal, HR, and Compliance Domains**
 
 *Transforming complex documents into intelligent insights using cutting-edge LLM technology and semantic search*
 
-[🚀 Quick Start](#-quick-start) •
-[📚 Documentation](#-documentation) •
-[🧪 Testing](#-testing) •
-[🌐 Live Demo](#-live-demo) •
-[🤝 Contributing](#-contributing)
+[🚀 Quick Start](#quick-start) •
+[📚 Documentation](#documentation) •
+[🧪 Testing](#testing) •
+[🌐 Live Demo](#live-demo) •
+[🤝 Contributing](#contributing)
 
 </div>
 
@@ -39,21 +39,23 @@ The **LLM-Powered Intelligent Query-Retrieval System** is a sophisticated docume
 
 ## 🏗️ **System Architecture**
 
-```mermaid
-graph LR
-    A[📄 Input Documents] --> B[🔧 Document Processor]
-    B --> C[🧠 LLM Parser]
-    C --> D[🔍 Embedding Engine]
-    D --> E[📊 Vector Database]
-    E --> F[🎯 Semantic Search]
-    F --> G[🔗 Clause Matcher]
-    G --> H[⚖️ Logic Evaluator]
-    H --> I[📋 JSON Response]
-    
-    style A fill:#e1f5fe
-    style I fill:#e8f5e8
-    style D fill:#fff3e0
-    style G fill:#fce4ec
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐    ┌──────────────────┐
+│ 📄 Input        │───▶│ 🔧 Document      │───▶│ 🧠 LLM          │───▶│ � Embedding    │
+│    Documents    │    │    Processor     │    │    Parser       │    │    Engine       │
+└─────────────────┘    └──────────────────┘    └─────────────────┘    └──────────────────┘
+                                                                                │
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐            │
+│ 📋 JSON         │◀───│ ⚖️ Logic         │◀───│ 🔗 Clause       │◀───────────┘
+│    Response     │    │    Evaluator     │    │    Matcher      │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐
+                       │ 📊 Vector        │
+                       │    Database      │
+                       │    (FAISS)       │
+                       └──────────────────┘
 ```
 
 ### 🔄 **Processing Pipeline**
@@ -67,54 +69,35 @@ graph LR
 
 ---
 
-## ✨ **Key Features**
+## ✨ Key Features
 
-<table>
-<tr>
-<td width="50%">
-
-### 🚀 **Performance**
+### 🚀 Performance
 - ⚡ **Sub-second Response** - Average 0.67s per query
 - 🎯 **High Accuracy** - 85%+ precision on domain-specific queries
 - 📈 **Scalable Architecture** - Handles documents up to 100MB
 - 🔄 **Concurrent Processing** - Multi-threaded document analysis
 
-</td>
-<td width="50%">
-
-### 🛡️ **Reliability**
+### 🛡️ Reliability
 - 🔒 **Secure Authentication** - Bearer token validation
 - 📊 **Comprehensive Logging** - Full audit trail and monitoring
 - 🔄 **Error Recovery** - Graceful fallback mechanisms
 - ✅ **100% API Uptime** - Production-ready deployment
 
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-### 🎨 **Intelligence**
+### 🎨 Intelligence
 - 🧠 **Context Awareness** - Multi-document cross-referencing
 - 🎯 **Intent Recognition** - Advanced query understanding
 - 📝 **Explainable Answers** - Source attribution and reasoning
 - 🔍 **Semantic Search** - Beyond keyword matching
 
-</td>
-<td width="50%">
-
-### 🌐 **Integration**
+### 🌐 Integration
 - 🚀 **RESTful API** - Standard HTTP endpoints
 - 📱 **Cross-Platform** - Works with any programming language
 - ☁️ **Cloud-Ready** - Deploy on AWS, Azure, or Google Cloud
 - 🔌 **Webhook Support** - Real-time event notifications
 
-</td>
-</tr>
-</table>
-
 ---
 
-## 🚀 **Quick Start**
+## 🚀 Quick Start
 
 ### **Prerequisites**
 
@@ -164,7 +147,7 @@ The server will be available at: **http://localhost:8000**
 
 ---
 
-## 📚 **Documentation**
+## 📚 Documentation
 
 ### **🎯 API Endpoints**
 
@@ -229,7 +212,7 @@ GET /
 
 ---
 
-## 🧪 **Testing**
+## 🧪 Testing
 
 ### **🔬 Comprehensive Testing Suite**
 
@@ -273,7 +256,7 @@ python test_improved_answers.py
 
 ---
 
-## 🌐 **Live Demo**
+## 🌐 Live Demo
 
 ### **🔗 Try the API**
 
@@ -302,7 +285,7 @@ This will test the system with:
 
 ---
 
-## 🛠️ **Development**
+## 🛠️ Development
 
 ### **📁 Project Structure**
 
@@ -462,7 +445,7 @@ INFO: All questions processed in 3.45 seconds
 
 ---
 
-## 🤝 **Contributing**
+## 🤝 Contributing
 
 We welcome contributions! Please follow these guidelines:
 
