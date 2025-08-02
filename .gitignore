@@ -1,4 +1,4 @@
-# LLM-Powered Intelligent Query-Retrieval System
+# Enhanced Document Reading API
 # Configuration and environment files
 
 # Environment variables
@@ -48,6 +48,70 @@ nosetests.xml
 coverage.xml
 *.cover
 *.py,cover
+
+# Test files and results
+test_*.py
+test_*.json
+*_test_results.json
+demo_test_response.json
+hackrx_compliance_test.json
+
+# Backup and temporary files
+*.backup
+*.old
+*.tmp
+main_*.py
+production_server*.py
+simple_server.py
+lightweight_*.py
+advanced_*.py
+start.py
+
+# Multiple requirements files (keep only requirements.txt)
+requirements-*.txt
+requirements_*.txt
+
+# Deployment scripts (handled by render.yaml)
+deploy_*.sh
+deploy_*.ps1
+run.bat
+run.sh
+Dockerfile
+runtime.txt
+.python-version
+
+# Extra documentation (keep main docs only)
+README_*.md
+STATUS.md
+TESTING_GUIDE.md
+PYTHON_VERSION_FIX.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Node modules (if any)
+node_modules/
+
+# Temporary directories
+tmp/
+temp/
 .hypothesis/
 .pytest_cache/
 

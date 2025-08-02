@@ -1,23 +1,162 @@
-# 🤖 LLM-Powered Intelligent Query-Retrieval System
+# 🤖 Enhanced Document Reading API
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.104.1-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/OpenAI-GPT4-412991?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI">
-  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
+  <img src="https://img.shields.io/badge/Version-4.1.0-brightgreen?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/HackRx-6.0-ff6b35?style=for-the-badge" alt="HackRx">
 </p>
 
 <p align="center">
-  <strong>🏆 Advanced Document Analysis System for Insurance, Legal, HR, and Compliance Domains</strong>
+  <strong>🏆 Intelligent Document Analysis System that ACTUALLY reads PDFs</strong>
 </p>
 
 <p align="center">
-  <em>Transforming complex documents into intelligent insights using cutting-edge LLM technology and semantic search</em>
+  <em>Advanced pattern matching and content analysis for precise answers from insurance and legal documents</em>
 </p>
 
+## 🚀 Quick Overview
+
+This system provides **intelligent document reading capabilities** with:
+
+- ✅ **Real PDF Processing**: Fetches and analyzes actual document content (79K+ characters from 16-page PDFs)
+- ✅ **Smart Answer Extraction**: 200+ insurance-specific patterns for precise responses  
+- ✅ **Multi-Strategy Analysis**: Direct keyword matching, contextual analysis, and semantic similarity
+- ✅ **Production Ready**: Optimized for reliable deployment on cloud platforms
+- ✅ **No Generic Responses**: Returns specific, factual answers from actual document content
+
+## 🏗️ Architecture
+
+```
+📄 PDF Document URL → 🔍 Content Extraction → 🧠 Smart Analysis → 💬 Precise Answers
+```
+
+## 📋 Project Structure
+
+```
+hack-6.0-hackathon/
+├── app.py                 # Main enhanced document reader
+├── requirements.txt       # Python dependencies
+├── render.yaml           # Deployment configuration
+├── .env                  # Environment variables
+├── README.md             # This file
+├── DEPLOYMENT_GUIDE.md   # Deployment instructions
+└── DOCUMENTATION.md      # API documentation
+```
+
+## 🛠️ Local Development
+
+### Prerequisites
+- Python 3.9+
+- pip package manager
+
+### Setup
+```bash
+# Clone repository
+git clone https://github.com/dineshsuthar123/Hackathon-project-Hackrx-6.0.git
+cd Hackathon-project-Hackrx-6.0
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variable
+export HACKRX_API_TOKEN="a3d1b4849a33b0269ac53fd27a8552eb1fbcc9cea01c70a1a85e11e330eb7c36"
+
+# Run locally
+python app.py
+```
+
+## � API Usage
+
+### Health Check
+```bash
+GET /
+```
+
+### Document Analysis
+```bash
+POST /hackrx/run
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "documents": "https://example.com/document.pdf",
+  "questions": [
+    "What is the grace period for premium payment?",
+    "What is the room rent limit?",
+    "What are the exclusions?"
+  ]
+}
+```
+
+### Response Format
+```json
+{
+  "answers": [
+    "The Grace Period for payment of the premium shall be thirty days",
+    "Room Rent, Boarding, Nursing Expenses up to 2% of sum insured subject to maximum of Rs. 5,000 per day",
+    "Expenses related to treatment necessitated due to participation in hazardous sports are excluded"
+  ]
+}
+```
+
+## 🚀 Deployment
+
+### Render Deployment
+1. Fork this repository
+2. Connect to Render
+3. Use these settings:
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `python app.py`
+   - **Environment Variable**: `HACKRX_API_TOKEN=a3d1b4849a33b0269ac53fd27a8552eb1fbcc9cea01c70a1a85e11e330eb7c36`
+
+## 🧠 Key Features
+
+### Enhanced Document Processing
+- **Robust PDF Extraction**: 60-second timeout with error recovery
+- **Page-by-Page Processing**: Handles complex multi-page documents
+- **Content Validation**: Ensures substantial document content extraction
+
+### Smart Answer Extraction
+- **Direct Content Search**: Finds answers in actual document text
+- **Pattern Recognition**: 200+ insurance-specific regex patterns
+- **Contextual Analysis**: Keyword overlap and specificity scoring
+- **Multi-Strategy Fallback**: Multiple approaches for complex queries
+
+### Production Optimizations
+- **Lightweight Dependencies**: No heavy ML libraries for reliable deployment
+- **Intelligent Caching**: Document processing cache for performance
+- **Comprehensive Logging**: Tracks document processing vs. fallback usage
+- **Error Handling**: Graceful degradation with meaningful error messages
+
+## 📊 Performance
+
+- **Document Processing**: Successfully extracts 79,228 characters from 16-page insurance PDFs
+- **Response Time**: Fast processing with intelligent caching
+- **Accuracy**: Returns specific, factual answers instead of generic responses
+- **Reliability**: Optimized for cloud deployment with minimal resource usage
+
+## 🔧 Technical Stack
+
+- **Backend**: FastAPI 0.104.1
+- **PDF Processing**: PyPDF2 3.0.1
+- **HTTP Client**: httpx 0.25.2
+- **Environment**: python-dotenv 1.0.0
+- **Validation**: Pydantic 2.5.0
+
+## 📝 License
+
+This project is part of HackRx 6.0 hackathon submission.
+
+## 🤝 Contributing
+
+This is a hackathon project. For issues or improvements, please create an issue in the repository.
+
+---
+
 <p align="center">
-  <a href="#quick-start">🚀 Quick Start</a> •
+  <strong>🏆 Enhanced Document Reading API v4.1.0 - Actually reads documents!</strong>
+</p>
   <a href="#documentation">📚 Documentation</a> •
   <a href="#testing">🧪 Testing</a> •
   <a href="#live-demo">🌐 Live Demo</a> •
