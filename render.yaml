@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: hackrx-query-system
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements-minimal.txt
+    startCommand: uvicorn production_server_lite:app --host 0.0.0.0 --port $PORT --workers 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PIP_NO_CACHE_DIR
+        value: "1"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: HACKRX_API_TOKEN
+        value: hackrx-demo-token-2024
+    healthCheckPath: /
+    autoDeploy: false
