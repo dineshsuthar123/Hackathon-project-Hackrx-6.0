@@ -332,18 +332,55 @@ async def health_check():
         "deployment": "production"
     }
 
+@app.get("/hackrx/run", response_model=HackRxResponse)
+async def hackrx_endpoint_get(
+    documents: str = "https://example.com/sample-document.pdf",
+    questions: str = "What are the key features of this document?",
+    token: str = Depends(verify_token)
+):
+    """
+    Main HackRx endpoint for document query processing (GET method)
+    
+    Processes documents and answers questions with intelligent fallbacks
+    Query parameters:
+    - documents: Document URL or content
+    - questions: Comma-separated list of questions
+    """
+    try:
+        # Parse questions from comma-separated string
+        question_list = [q.strip() for q in questions.split(',') if q.strip()]
+        if not question_list:
+            question_list = ["What are the key features of this document?"]
+        
+        logger.info(f"Processing HackRx GET request with {len(question_list)} questions")
+        
+        # Process the request
+        answers = await answer_generator.process_request(
+            documents,
+            question_list
+        )
+        
+        return HackRxResponse(answers=answers)
+        
+    except Exception as e:
+        logger.error(f"HackRx GET endpoint error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
 @app.post("/hackrx/run", response_model=HackRxResponse)
-async def hackrx_endpoint(
+async def hackrx_endpoint_post(
     request: HackRxRequest,
     token: str = Depends(verify_token)
 ):
     """
-    Main HackRx endpoint for document query processing
+    Main HackRx endpoint for document query processing (POST method)
     
     Processes documents and answers questions with intelligent fallbacks
     """
     try:
-        logger.info(f"Processing HackRx request with {len(request.questions)} questions")
+        logger.info(f"Processing HackRx POST request with {len(request.questions)} questions")
         
         # Process the request
         answers = await answer_generator.process_request(
@@ -354,7 +391,7 @@ async def hackrx_endpoint(
         return HackRxResponse(answers=answers)
         
     except Exception as e:
-        logger.error(f"HackRx endpoint error: {e}")
+        logger.error(f"HackRx POST endpoint error: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -368,8 +405,10 @@ if __name__ == "__main__":
     print("🚀 Starting LLM-Powered Intelligent Query-Retrieval System")
     print(f"📡 Server will be available at: http://0.0.0.0:{port}")
     print("🏥 Health check: GET /")
-    print("🔍 Main endpoint: POST /hackrx/run")
+    print("🔍 Main endpoint: GET /hackrx/run (with query params)")
+    print("🔍 Alternative: POST /hackrx/run (with JSON body)")
     print("🔑 Authentication: Bearer token required")
+    print("📝 GET Example: /hackrx/run?documents=url&questions=question1,question2")
     
     uvicorn.run(
         app,
