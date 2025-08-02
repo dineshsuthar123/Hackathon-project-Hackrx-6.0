@@ -1,0 +1,47 @@
+{
+  "answers": [
+    "A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits.",
+    "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered.",
+    "Yes, the policy covers maternity expenses, including childbirth and lawful medical termination of pregnancy. To be eligible, the female insured person must have been continuously covered for at least 24 months. The benefit is limited to two deliveries or terminations during the policy period.",
+    "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered.",
+    "Yes, the policy indemnifies the medical expenses for the organ donor's hospitalization for the purpose of harvesting the organ, provided the organ is for an insured person and the donation complies with the Transplantation of Human Organs Act, 1994."
+  ],
+  "metadata": {
+    "total_questions": 5,
+    "document_processed": true,
+    "processing_mode": "demo_simulation",
+    "explanations": [
+      {
+        "confidence_level": "simulated",
+        "sources_used": 1,
+        "reasoning": "Demo response based on sample policy content"
+      },
+      {
+        "confidence_level": "simulated",
+        "sources_used": 1,
+        "reasoning": "Demo response based on sample policy content"
+      },
+      {
+        "confidence_level": "simulated",
+        "sources_used": 1,
+        "reasoning": "Demo response based on sample policy content"
+      },
+      {
+        "confidence_level": "simulated",
+        "sources_used": 1,
+        "reasoning": "Demo response based on sample policy content"
+      },
+      {
+        "confidence_level": "simulated",
+        "sources_used": 1,
+        "reasoning": "Demo response based on sample policy content"
+      }
+    ],
+    "processing_details": {
+      "document_url": "https://hackrx.blob.core.windows.net/assets/policy.pdf",
+      "processing_time_ms": 1000,
+      "model_used": "demo_simulation",
+      "note": "This is a demo response. For full functionality, ensure OpenAI API quota is available."
+    }
+  }
+}
