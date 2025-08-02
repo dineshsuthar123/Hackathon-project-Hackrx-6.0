@@ -1,12 +1,12 @@
 services:
   - type: web
-    name: hackrx-query-system
+    name: hackrx-advanced-query-system
     env: python
     region: oregon
     plan: starter
     runtime: python
-    buildCommand: pip install --upgrade pip && pip install -r requirements-minimal-safe.txt
-    startCommand: uvicorn production_server_document_reader:app --host 0.0.0.0 --port $PORT --workers 1
+    buildCommand: pip install --upgrade pip && pip install -r requirements-fallback.txt
+    startCommand: uvicorn advanced_document_reader:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
