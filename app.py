@@ -25,6 +25,22 @@ try:
 except ImportError:
     PyPDF2 = None
 
+try:
+    from sentence_transformers import SentenceTransformer, CrossEncoder
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity
+    ADVANCED_MODELS_AVAILABLE = True
+except ImportError:
+    ADVANCED_MODELS_AVAILABLE = False
+    # Create dummy classes for fallback
+    class SentenceTransformer:
+        def __init__(self, *args, **kwargs): pass
+        def encode(self, *args, **kwargs): return []
+    
+    class CrossEncoder:
+        def __init__(self, *args, **kwargs): pass
+        def predict(self, *args, **kwargs): return []
+
 from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,9 +55,9 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Lightweight Intelligent Document Reading System",
-    description="Smart document processing with enhanced pattern matching and content extraction",
-    version="4.0.0"
+    title="Advanced Intelligent Document Reading System",
+    description="Advanced RAG system with semantic retrieval, re-ranking, and precise answer generation",
+    version="5.0.0"
 )
 
 # CORS middleware
@@ -73,13 +89,442 @@ class HackRxResponse(BaseModel):
 
 @dataclass
 class DocumentSection:
-    """Represents a section of document with metadata"""
+    """Legacy document section for backward compatibility"""
     title: str
     content: str
     keywords: List[str]
     numbers: List[str]
 
-class IntelligentDocumentParser:
+@dataclass
+class DocumentChunk:
+    """Represents a chunk of document with enhanced metadata for advanced retrieval"""
+    content: str
+    start_pos: int
+    end_pos: int
+    section_title: str
+    keywords: List[str]
+    numbers: List[str]
+    relevance_score: float = 0.0
+    rerank_score: float = 0.0
+
+class AdvancedDocumentChunker:
+    """Advanced document chunking with overlapping windows and better structure"""
+    
+    def __init__(self, chunk_size: int = 500, overlap: int = 100):
+        self.chunk_size = chunk_size
+        self.overlap = overlap
+        self.logger = logging.getLogger(__name__)
+    
+    def create_chunks(self, text: str) -> List[DocumentChunk]:
+        """Create overlapping chunks with enhanced metadata"""
+        # Clean and normalize text
+        text = self._clean_text(text)
+        
+        # Identify sections first
+        sections = self._identify_sections(text)
+        
+        chunks = []
+        chunk_id = 0
+        
+        for section_title, section_content in sections:
+            # Create overlapping chunks within each section
+            section_chunks = self._chunk_section(section_content, section_title)
+            chunks.extend(section_chunks)
+        
+        self.logger.info(f"Created {len(chunks)} document chunks")
+        return chunks
+    
+    def _chunk_section(self, content: str, section_title: str) -> List[DocumentChunk]:
+        """Create overlapping chunks within a section"""
+        chunks = []
+        words = content.split()
+        
+        if len(words) <= self.chunk_size:
+            # Section is small enough to be a single chunk
+            chunk = DocumentChunk(
+                content=content,
+                start_pos=0,
+                end_pos=len(content),
+                section_title=section_title,
+                keywords=self._extract_keywords(content),
+                numbers=self._extract_numbers(content)
+            )
+            chunks.append(chunk)
+        else:
+            # Create overlapping chunks
+            start = 0
+            while start < len(words):
+                end = min(start + self.chunk_size, len(words))
+                chunk_words = words[start:end]
+                chunk_content = ' '.join(chunk_words)
+                
+                chunk = DocumentChunk(
+                    content=chunk_content,
+                    start_pos=start,
+                    end_pos=end,
+                    section_title=section_title,
+                    keywords=self._extract_keywords(chunk_content),
+                    numbers=self._extract_numbers(chunk_content)
+                )
+                chunks.append(chunk)
+                
+                # Move start position with overlap
+                start = end - self.overlap
+                if start >= len(words):
+                    break
+        
+        return chunks
+    
+    def _clean_text(self, text: str) -> str:
+        """Clean and normalize document text"""
+        # Remove excessive whitespace
+        text = re.sub(r'\s+', ' ', text)
+        # Fix common PDF extraction issues
+        text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+        return text.strip()
+    
+    def _identify_sections(self, text: str) -> List[Tuple[str, str]]:
+        """Identify document sections based on headings and numbering"""
+        sections = []
+        
+        # Split by numbered sections
+        section_pattern = r'(\d+\.?\s*[A-Z][A-Z\s]+)\n'
+        parts = re.split(section_pattern, text)
+        
+        if len(parts) > 1:
+            for i in range(1, len(parts), 2):
+                if i + 1 < len(parts):
+                    title = parts[i].strip()
+                    content = parts[i + 1].strip()
+                    sections.append((title, content))
+        else:
+            # Fallback: split by double newlines
+            paragraphs = text.split('\n\n')
+            for i, para in enumerate(paragraphs):
+                if para.strip():
+                    sections.append((f"Section {i+1}", para.strip()))
+        
+        return sections
+    
+    def _extract_keywords(self, content: str) -> List[str]:
+        """Extract important keywords from content"""
+        keywords = []
+        
+        # Insurance-specific terms
+        insurance_terms = [
+            'grace period', 'premium', 'sum insured', 'deductible', 'co-payment',
+            'waiting period', 'pre-existing', 'hospitalization', 'room rent',
+            'icu', 'intensive care', 'cataract', 'ambulance', 'cumulative bonus',
+            'moratorium', 'free look', 'reimbursement', 'cashless', 'tpa',
+            'ayush', 'maternity', 'exclusion', 'coverage', 'modern treatment',
+            'day care', 'pre hospitalisation', 'post hospitalisation',
+            'emergency', 'portability', 'migration'
+        ]
+        
+        content_lower = content.lower()
+        for term in insurance_terms:
+            if term in content_lower:
+                keywords.append(term)
+        
+        # Extract capitalized terms
+        caps_terms = re.findall(r'\b[A-Z][A-Z\s]{2,}\b', content)
+        keywords.extend(caps_terms)
+        
+        return list(set(keywords))
+    
+    def _extract_numbers(self, content: str) -> List[str]:
+        """Extract numbers, percentages, and amounts from content"""
+        numbers = []
+        
+        # Various number patterns
+        patterns = [
+            r'\d+%',  # Percentages
+            r'Rs\.?\s*\d+,?\d*',  # Rupee amounts
+            r'INR\s*\d+,?\d*',  # INR amounts
+            r'\d+\s*(?:days?|months?|years?|hours?)',  # Time periods
+            r'\d+\s*(?:lacs?|lakhs?)',  # Population figures
+            r'\d+(?:\.\d+)?',  # General numbers
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            numbers.extend(matches)
+        
+        return list(set(numbers))
+
+class AdvancedRetriever:
+    """Advanced retrieval system with semantic search and re-ranking"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.embedding_model = None
+        self.reranker = None
+        
+        # Use global variable properly
+        global ADVANCED_MODELS_AVAILABLE
+        if ADVANCED_MODELS_AVAILABLE:
+            try:
+                # Use lightweight models for better deployment
+                self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+                self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+                self.logger.info("Advanced models loaded successfully")
+            except Exception as e:
+                self.logger.warning(f"Could not load advanced models: {e}")
+                ADVANCED_MODELS_AVAILABLE = False
+    
+    def retrieve_and_rerank(self, query: str, chunks: List[DocumentChunk], top_k: int = 5) -> List[DocumentChunk]:
+        """Retrieve and re-rank chunks for optimal relevance"""
+        if not chunks:
+            return []
+        
+        # Step 1: Initial retrieval - get more candidates
+        initial_candidates = self._initial_retrieval(query, chunks, top_k=15)
+        
+        # Step 2: Re-rank for precision
+        if self.reranker and len(initial_candidates) > 1:
+            reranked_chunks = self._rerank_chunks(query, initial_candidates)
+            # Return top k after re-ranking
+            return reranked_chunks[:top_k]
+        else:
+            # Fallback to keyword-based ranking
+            return self._keyword_based_ranking(query, initial_candidates)[:top_k]
+    
+    def _initial_retrieval(self, query: str, chunks: List[DocumentChunk], top_k: int = 15) -> List[DocumentChunk]:
+        """Initial retrieval using multiple strategies"""
+        if self.embedding_model:
+            return self._semantic_retrieval(query, chunks, top_k)
+        else:
+            return self._keyword_retrieval(query, chunks, top_k)
+    
+    def _semantic_retrieval(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
+        """Semantic retrieval using embeddings"""
+        try:
+            # Import numpy here for fallback compatibility
+            import numpy as np
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            # Get query embedding
+            query_embedding = self.embedding_model.encode([query])
+            
+            # Get chunk embeddings
+            chunk_texts = [chunk.content for chunk in chunks]
+            chunk_embeddings = self.embedding_model.encode(chunk_texts)
+            
+            # Calculate similarities
+            similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
+            
+            # Rank chunks by similarity
+            ranked_indices = np.argsort(similarities)[::-1]
+            
+            # Return top k chunks with relevance scores
+            result_chunks = []
+            for i in ranked_indices[:top_k]:
+                chunk = chunks[i]
+                chunk.relevance_score = float(similarities[i])
+                result_chunks.append(chunk)
+            
+            return result_chunks
+            
+        except Exception as e:
+            self.logger.error(f"Semantic retrieval failed: {e}")
+            return self._keyword_retrieval(query, chunks, top_k)
+    
+    def _keyword_retrieval(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
+        """Fallback keyword-based retrieval"""
+        query_words = set(re.findall(r'\b\w+\b', query.lower()))
+        query_words = {w for w in query_words if len(w) > 3}
+        
+        scored_chunks = []
+        
+        for chunk in chunks:
+            content_words = set(re.findall(r'\b\w+\b', chunk.content.lower()))
+            keyword_overlap = len(query_words & content_words)
+            
+            # Boost score if keywords match
+            keyword_score = sum(2 for kw in chunk.keywords if any(qw in kw.lower() for qw in query_words))
+            
+            # Boost score for numbers if query contains numbers
+            number_score = 0
+            if re.search(r'\d+', query):
+                number_score = len(chunk.numbers)
+            
+            total_score = keyword_overlap + keyword_score + number_score
+            chunk.relevance_score = total_score
+            scored_chunks.append(chunk)
+        
+        # Sort by score and return top k
+        scored_chunks.sort(key=lambda x: x.relevance_score, reverse=True)
+        return scored_chunks[:top_k]
+    
+    def _rerank_chunks(self, query: str, chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+        """Re-rank chunks using cross-encoder for precision"""
+        try:
+            # Prepare query-chunk pairs
+            pairs = [(query, chunk.content) for chunk in chunks]
+            
+            # Get re-ranking scores
+            rerank_scores = self.reranker.predict(pairs)
+            
+            # Update chunks with rerank scores
+            for i, chunk in enumerate(chunks):
+                chunk.rerank_score = float(rerank_scores[i])
+            
+            # Sort by rerank score
+            chunks.sort(key=lambda x: x.rerank_score, reverse=True)
+            
+            self.logger.info(f"Re-ranked {len(chunks)} chunks")
+            return chunks
+            
+        except Exception as e:
+            self.logger.error(f"Re-ranking failed: {e}")
+            return chunks
+    
+    def _keyword_based_ranking(self, query: str, chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+        """Enhanced keyword-based ranking as fallback"""
+        return sorted(chunks, key=lambda x: x.relevance_score, reverse=True)
+
+class PrecisionAnswerGenerator:
+    """Generate precise, concise answers from retrieved context"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+    
+    def generate_answer(self, query: str, context_chunks: List[DocumentChunk]) -> str:
+        """Generate precise answer from context using enhanced prompting"""
+        if not context_chunks:
+            return "The requested information is not available in the document."
+        
+        # Combine top context chunks
+        context = self._combine_context(context_chunks)
+        
+        # Use enhanced prompt for better synthesis
+        answer = self._synthesize_answer(query, context)
+        
+        return answer
+    
+    def _combine_context(self, chunks: List[DocumentChunk]) -> str:
+        """Intelligently combine context from chunks"""
+        if not chunks:
+            return ""
+        
+        # Remove duplicates and combine
+        seen_content = set()
+        combined_parts = []
+        
+        for chunk in chunks:
+            content = chunk.content.strip()
+            if content and content not in seen_content:
+                seen_content.add(content)
+                combined_parts.append(f"[{chunk.section_title}] {content}")
+        
+        return "\n\n".join(combined_parts)
+    
+    def _synthesize_answer(self, query: str, context: str) -> str:
+        """Synthesize precise answer using pattern matching and context analysis"""
+        # Enhanced pattern-based extraction with better templates
+        pattern_answer = self._enhanced_pattern_extraction(query, context)
+        if pattern_answer:
+            return pattern_answer
+        
+        # Direct quote extraction
+        direct_answer = self._extract_direct_quote(query, context)
+        if direct_answer:
+            return direct_answer
+        
+        # Contextual synthesis
+        synthesized = self._contextual_synthesis(query, context)
+        return synthesized
+    
+    def _enhanced_pattern_extraction(self, query: str, context: str) -> Optional[str]:
+        """Enhanced pattern extraction with better accuracy"""
+        query_lower = query.lower()
+        context_lower = context.lower()
+        
+        # Define precise extraction patterns
+        patterns = {
+            'grace period': {
+                'pattern': r'grace period.*?(\d+)\s*days?',
+                'template': "The grace period is {0} days."
+            },
+            'icu': {
+                'pattern': r'(?:icu|intensive care).*?up to\s*(\d+%?)\s*.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
+                'template': "ICU expenses are covered up to {0} of sum insured, maximum Rs. {1} per day."
+            },
+            'room rent': {
+                'pattern': r'room rent.*?up to\s*(\d+%?)\s*.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
+                'template': "Room rent is covered up to {0} of sum insured, maximum Rs. {1} per day."
+            },
+            'cataract': {
+                'pattern': r'cataract.*?(\d+%?)\s*.*?sum insured.*?inr\s*([0-9,]+)',
+                'template': "Cataract treatment is covered up to {0} of Sum Insured or INR {1} per eye, whichever is lower."
+            },
+            'pre-existing': {
+                'pattern': r'pre-existing.*?(\d+)\s*(?:\([^)]*\))?\s*months',
+                'template': "Pre-existing diseases have a waiting period of {0} months of continuous coverage."
+            },
+            'cumulative bonus': {
+                'pattern': r'cumulative bonus.*?(\d+%?)\s*.*?claim.*?free.*?maximum.*?(\d+%?)',
+                'template': "Cumulative bonus is {0} per claim-free year, maximum {1} of sum insured."
+            }
+        }
+        
+        for pattern_name, pattern_info in patterns.items():
+            if pattern_name in query_lower:
+                match = re.search(pattern_info['pattern'], context_lower, re.IGNORECASE)
+                if match:
+                    try:
+                        return pattern_info['template'].format(*match.groups())
+                    except:
+                        continue
+        
+        return None
+    
+    def _extract_direct_quote(self, query: str, context: str) -> Optional[str]:
+        """Extract most relevant sentence as direct quote"""
+        query_words = set(re.findall(r'\b\w{3,}\b', query.lower()))
+        sentences = re.split(r'[.!?]+', context)
+        
+        best_sentence = None
+        best_score = 0
+        
+        for sentence in sentences:
+            if len(sentence.strip()) < 30:
+                continue
+            
+            sentence_words = set(re.findall(r'\b\w{3,}\b', sentence.lower()))
+            overlap = len(query_words & sentence_words)
+            
+            # Boost score for specific information
+            has_numbers = bool(re.search(r'\d+', sentence))
+            has_specifics = bool(re.search(r'limit|maximum|covered|benefit|rs\.|inr|%', sentence.lower()))
+            
+            score = overlap + (2 if has_numbers else 0) + (1 if has_specifics else 0)
+            
+            if score > best_score:
+                best_score = score
+                best_sentence = sentence.strip()
+        
+        return best_sentence if best_score >= 2 else None
+    
+    def _contextual_synthesis(self, query: str, context: str) -> str:
+        """Final fallback with better context understanding"""
+        # Look for key information in context
+        lines = context.split('\n')
+        relevant_lines = []
+        
+        query_words = re.findall(r'\b\w{3,}\b', query.lower())
+        
+        for line in lines:
+            if any(word in line.lower() for word in query_words):
+                if len(line.strip()) > 20:  # Substantial content
+                    relevant_lines.append(line.strip())
+        
+        if relevant_lines:
+            # Return the most specific line
+            best_line = max(relevant_lines, key=lambda x: len(re.findall(r'\d+', x)))
+            return best_line
+        
+        return "The specific information requested is not clearly stated in the available document content."
     """Parse documents into structured sections with intelligent keyword extraction"""
     
     def __init__(self):
@@ -602,49 +1047,50 @@ class SmartAnswerExtractor:
         # Final fallback
         return "The requested information is not available in the current document content."
 
-class LightweightDocumentProcessor:
-    """Main lightweight document processing system"""
+class AdvancedDocumentProcessor:
+    """Advanced document processing system with re-ranking and precise answer generation"""
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.parser = IntelligentDocumentParser()
-        self.extractor = SmartAnswerExtractor()
+        self.chunker = AdvancedDocumentChunker()
+        self.retriever = AdvancedRetriever()
+        self.generator = PrecisionAnswerGenerator()
         self._document_cache = {}
+        self._chunk_cache = {}
     
     async def process_document_and_answer(self, document_url: str, questions: List[str]) -> List[str]:
-        """Process document and answer questions efficiently"""
+        """Process document and answer questions with advanced RAG pipeline"""
         cache_key = hashlib.md5(document_url.encode()).hexdigest()
         
-        # Get or fetch document content
-        if cache_key in self._document_cache:
-            sections = self._document_cache[cache_key]
-            self.logger.info("Using cached document sections")
+        # Get or create document chunks
+        if cache_key in self._chunk_cache:
+            chunks = self._chunk_cache[cache_key]
+            self.logger.info("Using cached document chunks")
         else:
             # Fetch document content
             document_content = await self._fetch_document_content(document_url)
             
-            # Check if we got actual content or fallback
-            if len(document_content.strip()) > 5000:  # Substantial content
-                self.logger.info(f"Processing actual document content ({len(document_content)} characters)")
-            else:
-                self.logger.warning("Using minimal/fallback content - may not have full document")
+            # Create chunks with advanced chunker
+            chunks = self.chunker.create_chunks(document_content)
             
-            # Parse into sections
-            sections = self.parser.parse_document(document_content)
-            
-            # Cache sections
-            self._document_cache[cache_key] = sections
-            self.logger.info(f"Cached {len(sections)} document sections")
+            # Cache chunks
+            self._chunk_cache[cache_key] = chunks
+            self.logger.info(f"Created and cached {len(chunks)} document chunks")
         
-        # Answer each question
+        # Answer each question using advanced RAG
         answers = []
         for i, question in enumerate(questions):
             self.logger.info(f"Processing question {i+1}/{len(questions)}: {question[:50]}...")
-            answer = self.extractor.extract_answer(question, sections)
             
-            # Log if we're returning a generic answer
-            if "specific information" in answer.lower() or "requested information" in answer.lower():
-                self.logger.warning(f"Generic answer returned for: {question[:30]}...")
+            # Retrieve relevant chunks with re-ranking
+            relevant_chunks = self.retriever.retrieve_and_rerank(question, chunks, top_k=5)
+            
+            # Generate precise answer
+            answer = self.generator.generate_answer(question, relevant_chunks)
+            
+            # Log answer quality
+            if "specific information" in answer.lower() or "not available" in answer.lower():
+                self.logger.warning(f"Generic answer for: {question[:30]}...")
             else:
                 self.logger.info(f"Specific answer found for: {question[:30]}...")
             
@@ -667,7 +1113,7 @@ class LightweightDocumentProcessor:
                     
                     if 'pdf' in content_type or document_url.lower().endswith('.pdf'):
                         text_content = self._extract_pdf_text(response.content)
-                        if text_content and len(text_content.strip()) > 1000:  # Ensure we got substantial content
+                        if text_content and len(text_content.strip()) > 1000:
                             self.logger.info(f"Successfully extracted {len(text_content)} characters from PDF")
                             return text_content
                         else:
@@ -864,25 +1310,31 @@ MIGRATION:
 Migration means a facility provided to policyholders to transfer the credit gained for pre-existing conditions and time bound exclusions from one health insurance policy to another with the same insurer. Minimum prior notice of 45 days before renewal is required.
         """
 
-# Initialize the lightweight processor
-lightweight_processor = LightweightDocumentProcessor()
+# Initialize the advanced processor
+advanced_processor = AdvancedDocumentProcessor()
+
+# For backward compatibility, alias the main processor
+lightweight_processor = advanced_processor
 
 @app.get("/")
 async def health_check():
     """Health check endpoint"""
     return {
-        "message": "Lightweight Intelligent Document Reading System",
+        "message": "Advanced Intelligent Document Reading System",
         "status": "healthy",
-        "version": "4.0.0",
+        "version": "5.0.0",
         "features": [
-            "Enhanced pattern matching",
-            "Intelligent keyword extraction",
-            "Structured document parsing",
-            "Smart content analysis",
-            "Reliable deployment optimized",
-            "No heavy ML dependencies"
+            "Advanced RAG pipeline with re-ranking",
+            "Semantic retrieval with embeddings",
+            "Cross-encoder re-ranking for precision",
+            "Precise answer synthesis",
+            "Overlapping chunk strategy",
+            "Enhanced pattern extraction",
+            "Contextual answer generation",
+            "Deployment optimized"
         ],
-        "deployment": "optimized"
+        "advanced_models": ADVANCED_MODELS_AVAILABLE,
+        "deployment": "production-ready"
     }
 
 @app.get("/hackrx/run", response_model=HackRxResponse)
@@ -892,7 +1344,7 @@ async def hackrx_endpoint_get(
     token: str = Depends(verify_token)
 ):
     """
-    Lightweight HackRx endpoint (GET method) - Reliable intelligent document processing
+    Advanced HackRx endpoint (GET method) - RAG system with re-ranking and precise synthesis
     """
     try:
         # Parse questions from comma-separated string
@@ -900,15 +1352,15 @@ async def hackrx_endpoint_get(
         if not question_list:
             question_list = ["What are the key features of this document?"]
         
-        logger.info(f"Processing lightweight request with {len(question_list)} questions")
+        logger.info(f"Processing advanced request with {len(question_list)} questions")
         
-        # Process document and answer questions
+        # Process document and answer questions using advanced RAG
         answers = await lightweight_processor.process_document_and_answer(documents, question_list)
         
         return HackRxResponse(answers=answers)
         
     except Exception as e:
-        logger.error(f"Lightweight endpoint error: {e}")
+        logger.error(f"Advanced endpoint error: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -920,18 +1372,18 @@ async def hackrx_endpoint_post(
     token: str = Depends(verify_token)
 ):
     """
-    Lightweight HackRx endpoint (POST method) - Reliable intelligent document processing
+    Advanced HackRx endpoint (POST method) - RAG system with re-ranking and precise synthesis
     """
     try:
-        logger.info(f"Processing lightweight POST request with {len(request.questions)} questions")
+        logger.info(f"Processing advanced POST request with {len(request.questions)} questions")
         
-        # Process document and answer questions
+        # Process document and answer questions using advanced RAG
         answers = await lightweight_processor.process_document_and_answer(request.documents, request.questions)
         
         return HackRxResponse(answers=answers)
         
     except Exception as e:
-        logger.error(f"Lightweight POST endpoint error: {e}")
+        logger.error(f"Advanced POST endpoint error: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -942,12 +1394,13 @@ if __name__ == "__main__":
     
     port = int(os.getenv("PORT", 8000))
     
-    print("🚀 Starting Lightweight Intelligent Document Reading System")
+    print("🚀 Starting Advanced Intelligent Document Reading System")
     print(f"📡 Server: http://0.0.0.0:{port}")
-    print("🧠 Features: Enhanced patterns, smart extraction, reliable deployment")
-    print("⚡ Optimized: No heavy ML dependencies, fast startup")
+    print("🧠 Features: Advanced RAG, semantic retrieval, re-ranking, precise synthesis")
+    print("⚡ Advanced: Cross-encoder re-ranking, overlapping chunks, enhanced patterns")
     print("🔍 Endpoints: GET/POST /hackrx/run")
     print("🔑 Auth: Bearer token required")
+    print(f"🤖 Advanced Models: {'Available' if ADVANCED_MODELS_AVAILABLE else 'Fallback mode'}")
     
     uvicorn.run(
         app,
