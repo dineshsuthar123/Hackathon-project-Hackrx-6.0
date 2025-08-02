@@ -13,10 +13,10 @@ Go to your Render service settings and:
 
 1. **Environment** tab → Add environment variable:
    ```
-   PYTHON_VERSION = 3.11
+   PYTHON_VERSION = 3.11.9
    ```
 
-2. **OR** in the **Settings** tab, look for Python version and set it to **3.11**
+2. **OR** in the **Settings** tab, look for Python version and set it to **3.11.9**
 
 ### 2. **USE THE MINIMAL REQUIREMENTS**
 Update your build command to use:

@@ -1,5 +1,5 @@
 # Absolute minimal requirements - GUARANTEED to work
-# Only packages with 100% pre-built wheels for Python 3.11
+# Only packages with 100% pre-built wheels for Python 3.11.9
 
 fastapi==0.104.1
 uvicorn==0.24.0
