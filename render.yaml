@@ -4,8 +4,8 @@ services:
     env: python
     region: oregon
     plan: starter
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements-minimal.txt
-    startCommand: uvicorn production_server_lite:app --host 0.0.0.0 --port $PORT --workers 1
+    buildCommand: pip install --upgrade pip && pip install -r requirements-ultra-light.txt
+    startCommand: uvicorn production_server_zero_deps:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
