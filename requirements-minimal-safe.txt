@@ -11,6 +11,9 @@ pydantic==2.3.0
 python-dotenv==1.0.0
 httpx==0.25.2
 
+# PDF processing (lightweight)
+PyPDF2==3.0.1
+
 # Build tools
 wheel
 setuptools

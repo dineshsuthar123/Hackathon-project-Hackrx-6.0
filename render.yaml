@@ -6,7 +6,7 @@ services:
     plan: starter
     runtime: python
     buildCommand: pip install --upgrade pip && pip install -r requirements-minimal-safe.txt
-    startCommand: uvicorn production_server_lite:app --host 0.0.0.0 --port $PORT --workers 1
+    startCommand: uvicorn production_server_document_reader:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
