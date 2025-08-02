@@ -1,0 +1,16 @@
+# Absolute minimal requirements - GUARANTEED to work
+# Only packages with 100% pre-built wheels for Python 3.11
+
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# Stable pydantic with guaranteed wheels
+pydantic==2.3.0
+
+# Basic utilities
+python-dotenv==1.0.0
+httpx==0.25.2
+
+# Build tools
+wheel
+setuptools

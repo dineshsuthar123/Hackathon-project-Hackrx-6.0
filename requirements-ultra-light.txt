@@ -18,7 +18,7 @@ httpx==0.25.2
 requests==2.31.0
 
 # Core Dependencies (stable versions with wheels)
-pydantic==2.4.2
+pydantic==2.3.0
 python-dotenv==1.0.0
 BeautifulSoup4==4.12.2
 

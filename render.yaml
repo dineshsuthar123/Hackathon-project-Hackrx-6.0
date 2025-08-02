@@ -4,11 +4,12 @@ services:
     env: python
     region: oregon
     plan: starter
-    buildCommand: pip install --upgrade pip && pip install -r requirements-ultra-light.txt
+    runtime: python
+    buildCommand: pip install --upgrade pip && pip install -r requirements-minimal-safe.txt
     startCommand: uvicorn production_server_zero_deps:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: "3.11"
       - key: PIP_NO_CACHE_DIR
         value: "1"
       - key: PYTHONUNBUFFERED
