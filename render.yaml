@@ -6,7 +6,7 @@ services:
     plan: starter
     runtime: python
     buildCommand: pip install --upgrade pip && pip install -r requirements-minimal-safe.txt
-    startCommand: uvicorn production_server_zero_deps:app --host 0.0.0.0 --port $PORT --workers 1
+    startCommand: uvicorn production_server_lite:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
@@ -17,6 +17,6 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: HACKRX_API_TOKEN
-        value: hackrx-demo-token-2024
+        value: a3d1b4849a33b0269ac53fd27a8552eb1fbcc9cea01c70a1a85e11e330eb7c36
     healthCheckPath: /
     autoDeploy: false
