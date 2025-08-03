@@ -1,5 +1,5 @@
-# EMERGENCY LIGHTWEIGHT DEPLOYMENT - Render Memory Fix
-# Core functionality only to prevent 502 errors
+# PHASE 0: CLEAN ROOM PROTOCOL - Robust PDF parsing
+# Emergency data corruption fix with validated extraction
 
 # Core FastAPI and server
 fastapi==0.104.1
@@ -9,8 +9,12 @@ pydantic>=2.5.3,<3.0.0
 
 # HTTP client and file handling
 httpx>=0.26.0
-PyPDF2==3.0.1
 python-multipart==0.0.6
+
+# PHASE 0: ROBUST PDF PARSERS (priority order)
+PyMuPDF==1.23.8              # PRIMARY - most robust PDF parser (~15MB)
+pdfplumber==0.10.3           # SECONDARY - excellent for tables (~5MB)
+PyPDF2==3.0.1               # FALLBACK - problematic but lightweight (~2MB)
 
 # Minimal ML dependencies for basic functionality
 numpy==1.24.3
