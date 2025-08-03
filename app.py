@@ -371,18 +371,64 @@ class IndustryStandardRetriever:
         return unique
 
 class SimpleDocumentChunker:
-    """Simple, reliable document chunker"""
+    """Simple, reliable document chunker with proper list handling"""
     
-    def __init__(self, chunk_size: int = 250, overlap: int = 40):
+    def __init__(self, chunk_size: int = 200, overlap: int = 30):
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.logger = logging.getLogger(__name__)
     
     def create_chunks(self, text: str) -> List[DocumentChunk]:
-        """Create overlapping chunks from document"""
+        """Create overlapping chunks with special handling for annexures and lists"""
         # Clean text
         text = re.sub(r'\s+', ' ', text).strip()
         
+        # CRITICAL FIX: Handle Annexure-A separately to prevent giant chunks
+        if "ANNEXURE-A" in text or "List I – List of which coverage is not available" in text:
+            return self._create_smart_chunks_with_annexure_handling(text)
+        
+        # Regular sentence-based chunking for normal content
+        return self._create_sentence_chunks(text)
+    
+    def _create_smart_chunks_with_annexure_handling(self, text: str) -> List[DocumentChunk]:
+        """Handle document with annexure lists intelligently"""
+        chunks = []
+        
+        # AGGRESSIVE FIX: Remove entire annexure sections before processing
+        # Split at annexure and only keep content before it
+        annexure_split = re.split(r'(ANNEXURE-A|List I –|Annexure -A)', text, flags=re.IGNORECASE)
+        
+        # Only process the content before any annexure
+        main_content = annexure_split[0] if annexure_split else text
+        
+        # Additional filtering for any remaining problematic patterns
+        lines = main_content.split('\n')
+        clean_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip lines that are clearly from lists or annexures
+            if (len(line) < 5 or 
+                re.match(r'^\d+\s+[A-Z][A-Z\s/]+$', line) or  # List items like "1 BABY FOOD"
+                'BABY FOOD' in line or 
+                'AMBULANCE COLLAR' in line or
+                'VASOFIX SAFETY' in line or
+                line.startswith('Sl Item')):
+                continue
+            clean_lines.append(line)
+        
+        clean_content = '\n'.join(clean_lines)
+        
+        if clean_content.strip():
+            # Process the clean content
+            section_chunks = self._create_sentence_chunks(clean_content)
+            chunks.extend(section_chunks)
+        
+        self.logger.info(f"✅ Created {len(chunks)} chunks (aggressive annexure filtering)")
+        return chunks
+    
+    def _create_sentence_chunks(self, text: str) -> List[DocumentChunk]:
+        """Create sentence-based chunks for normal content"""
         # Split into sentences
         sentences = re.split(r'[.!?]+', text)
         sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
@@ -418,7 +464,6 @@ class SimpleDocumentChunker:
             )
             chunks.append(chunk)
         
-        self.logger.info(f"✅ Created {len(chunks)} document chunks")
         return chunks
 
 class PrecisionAnswerGenerator:
