@@ -9,12 +9,13 @@ pydantic==2.5.0
 httpx==0.25.2
 PyPDF2==3.0.1
 
-# Essential utilities only
+# Essential utilities
 python-multipart==0.0.6
 
-# Advanced ML components (commented out to prevent 502 deployment issues)
-# Uncomment these for full features if deployment platform supports them:
+# Basic ML support for production deployment
+numpy==1.24.3
+
+# Advanced ML components (optional - uncomment for full features)
 # sentence-transformers==2.2.2
 # scikit-learn==1.3.2
-# numpy==1.24.3
 # transformers==4.35.2

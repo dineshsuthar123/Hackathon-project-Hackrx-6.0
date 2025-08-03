@@ -9,11 +9,23 @@ import json
 import logging
 import re
 import asyncio
-import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
 import hashlib
 from dataclasses import dataclass
+
+# Optional numpy import for production deployment compatibility
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    # Create dummy numpy for fallback
+    class DummyNumpy:
+        def argsort(self, arr):
+            # Fallback: return sorted indices based on values
+            return sorted(range(len(arr)), key=lambda i: arr[i], reverse=True)
+    np = DummyNumpy()
 
 try:
     import httpx
@@ -479,8 +491,14 @@ class StabilizedRetriever:
             # Calculate similarities
             similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
             
-            # Rank chunks by similarity
-            ranked_indices = np.argsort(similarities)[::-1]
+            # Rank chunks by similarity - handle numpy availability
+            if NUMPY_AVAILABLE:
+                ranked_indices = np.argsort(similarities)[::-1]
+            else:
+                # Fallback sorting when numpy is not available
+                indexed_similarities = [(i, sim) for i, sim in enumerate(similarities)]
+                indexed_similarities.sort(key=lambda x: x[1], reverse=True)
+                ranked_indices = [i for i, _ in indexed_similarities]
             
             # Return top k chunks with relevance scores
             result_chunks = []
@@ -1367,6 +1385,9 @@ class PrecisionAnswerGenerator:
             if any(word in fact.lower() for word in ['means', 'defined', 'definition']):
                 return fact
         return facts[0] if facts else "Definition is not clearly provided in the available context."
+
+    def generate_answer(self, query: str, context_chunks: List[DocumentChunk]) -> str:
+        """Generate precise answer from retrieved context chunks"""
         if not context_chunks:
             return "The requested information is not available in the document."
         
