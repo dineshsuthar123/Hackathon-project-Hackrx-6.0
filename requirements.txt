@@ -1,4 +1,4 @@
-# Deployment Requirements - Lightweight Version for Production
+# Deployment Requirements - Production Ready with LLM
 # Core FastAPI dependencies
 fastapi==0.104.1
 uvicorn==0.24.0
@@ -6,7 +6,7 @@ python-dotenv==1.0.0
 pydantic==2.5.0
 
 # HTTP client and PDF processing
-httpx==0.25.2
+httpx>=0.26.0
 PyPDF2==3.0.1
 
 # Essential utilities
@@ -18,11 +18,10 @@ numpy==1.24.3
 # Advanced ML components (ENABLED for LLM features)
 sentence-transformers==2.2.2
 scikit-learn==1.3.2
-transformers==4.35.2
+transformers>=4.35.0
 
 # LLM Enhancement (ENABLED for improved answer quality)
 torch>=2.0.0
-transformers>=4.35.0
 ollama-python>=0.1.0
 
 # Production LLM features ENABLED:
