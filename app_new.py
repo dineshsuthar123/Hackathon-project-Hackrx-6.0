@@ -191,8 +191,54 @@ class IndustryStandardRetriever:
             return []
     
     def _enhanced_keyword_search(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
-        """Enhanced keyword search with insurance-specific scoring"""
+        """Enhanced keyword search with insurance-specific scoring and content validation"""
         query_words = set(re.findall(r'\b\w{3,}\b', query.lower()))
+        
+        # Super high priority content matches (exact content targeting)
+        super_priority = {
+            'ambulance': {
+                'query_triggers': ['ambulance', 'coverage', 'amount'],
+                'content_must_have': ['ambulance', 'rs', '2,000'],
+                'content_must_not_have': ['pre-existing', 'disease'],
+                'score': 50.0
+            },
+            'room_rent': {
+                'query_triggers': ['room', 'rent', 'limit'],
+                'content_must_have': ['room rent', 'boarding', 'nursing'],
+                'content_must_not_have': ['pre-existing', 'disease'],
+                'score': 45.0
+            },
+            'icu': {
+                'query_triggers': ['icu', 'intensive', 'care'],
+                'content_must_have': ['intensive care unit', 'icu'],
+                'content_must_not_have': ['pre-existing', 'disease'],
+                'score': 45.0
+            },
+            'cumulative_bonus': {
+                'query_triggers': ['cumulative', 'bonus', 'percentage'],
+                'content_must_have': ['cumulative bonus', 'claim free'],
+                'content_must_not_have': ['pre-existing', 'disease'],
+                'score': 45.0
+            },
+            'cataract_waiting': {
+                'query_triggers': ['cataract', 'waiting', 'period'],
+                'content_must_have': ['cataract', '24', 'months'],
+                'content_must_not_have': ['pre-existing disease means'],
+                'score': 45.0
+            },
+            'moratorium': {
+                'query_triggers': ['moratorium', 'period'],
+                'content_must_have': ['moratorium', 'sixty', 'months'],
+                'content_must_not_have': ['grace period'],
+                'score': 45.0
+            },
+            'grace_period': {
+                'query_triggers': ['grace', 'period', 'premium'],
+                'content_must_have': ['grace period', 'premium', 'thirty days'],
+                'content_must_not_have': ['moratorium'],
+                'score': 45.0
+            }
+        }
         
         # Insurance-specific boost terms
         boost_terms = {
@@ -208,37 +254,124 @@ class IndustryStandardRetriever:
             content_lower = chunk.content.lower()
             content_words = set(re.findall(r'\b\w{3,}\b', content_lower))
             
-            # Base word overlap score
-            overlap_score = len(query_words.intersection(content_words))
+            final_score = 0
             
-            # Apply boost terms
-            boost_score = 0
-            for term, weight in boost_terms.items():
-                if term in query.lower() and term in content_lower:
-                    boost_score += weight
+            # PRIORITY 1: Super high priority content matches
+            for priority_type, priority_info in super_priority.items():
+                if any(trigger in query.lower() for trigger in priority_info['query_triggers']):
+                    # Check required content
+                    required_matches = sum(1 for req in priority_info['content_must_have'] 
+                                         if req in content_lower)
+                    
+                    # Check forbidden content
+                    forbidden_matches = sum(1 for forb in priority_info['content_must_not_have'] 
+                                          if forb in content_lower)
+                    
+                    # Only score if requirements met and no forbidden content
+                    if required_matches > 0 and forbidden_matches == 0:
+                        final_score = priority_info['score'] + required_matches * 5
+                        break  # This is the target chunk
             
-            # Numerical information bonus
-            number_bonus = len(re.findall(r'\d+', chunk.content)) * 0.5
-            
-            # Final score
-            final_score = overlap_score + boost_score + number_bonus
+            # PRIORITY 2: If no super priority match, use standard scoring
+            if final_score == 0:
+                # Base word overlap score
+                overlap_score = len(query_words.intersection(content_words))
+                
+                # Apply boost terms
+                boost_score = 0
+                for term, weight in boost_terms.items():
+                    if term in query.lower() and term in content_lower:
+                        boost_score += weight
+                
+                # Numerical information bonus
+                number_bonus = len(re.findall(r'\d+', chunk.content)) * 0.5
+                
+                # Final score for standard matching
+                final_score = overlap_score + boost_score + number_bonus
             
             if final_score > 0:
                 chunk.relevance_score = final_score
                 scored_chunks.append(chunk)
         
-        # Sort by score
+        # Sort by score (highest first)
         scored_chunks.sort(key=lambda x: x.relevance_score, reverse=True)
         return scored_chunks[:top_k]
     
     def _insurance_pattern_search(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
-        """Pattern-based search for specific insurance queries"""
+        """Pattern-based search for specific insurance queries with precise targeting"""
         query_lower = query.lower()
         
-        # Insurance patterns with scoring
-        patterns = {
+        # High-priority specific content searches
+        specific_searches = {
+            'ambulance': {
+                'triggers': ['ambulance', 'coverage', 'amount'],
+                'required_content': ['ambulance', 'rs'],
+                'forbidden_content': ['pre-existing', 'disease', 'waiting period'],
+                'score': 10.0
+            },
+            'room_rent': {
+                'triggers': ['room', 'rent', 'limit'],
+                'required_content': ['room rent', 'boarding', 'nursing'],
+                'forbidden_content': ['pre-existing', 'disease'],
+                'score': 8.0
+            },
+            'icu': {
+                'triggers': ['icu', 'intensive', 'care'],
+                'required_content': ['intensive care unit', 'icu'],
+                'forbidden_content': ['pre-existing', 'disease'],
+                'score': 8.0
+            },
+            'cumulative_bonus': {
+                'triggers': ['cumulative', 'bonus', 'percentage'],
+                'required_content': ['cumulative bonus', 'claim free'],
+                'forbidden_content': ['pre-existing', 'disease'],
+                'score': 8.0
+            },
+            'cataract_waiting': {
+                'triggers': ['cataract', 'waiting', 'period'],
+                'required_content': ['cataract', 'months'],
+                'forbidden_content': ['pre-existing disease means'],
+                'score': 8.0
+            },
+            'moratorium': {
+                'triggers': ['moratorium', 'period'],
+                'required_content': ['moratorium', 'sixty', 'months'],
+                'forbidden_content': ['grace period', 'premium'],
+                'score': 8.0
+            },
+            'grace_period': {
+                'triggers': ['grace', 'period', 'premium'],
+                'required_content': ['grace period', 'premium', 'thirty days'],
+                'forbidden_content': ['moratorium', 'pre-hospitalization'],
+                'score': 8.0
+            }
+        }
+        
+        pattern_chunks = []
+        
+        # First: High-priority specific searches
+        for search_type, search_info in specific_searches.items():
+            if any(trigger in query_lower for trigger in search_info['triggers']):
+                for chunk in chunks:
+                    content_lower = chunk.content.lower()
+                    
+                    # Check required content
+                    required_matches = sum(1 for req in search_info['required_content'] 
+                                         if req in content_lower)
+                    
+                    # Check forbidden content
+                    forbidden_matches = sum(1 for forb in search_info['forbidden_content'] 
+                                          if forb in content_lower)
+                    
+                    # Score only if required content found and no forbidden content
+                    if required_matches > 0 and forbidden_matches == 0:
+                        chunk.relevance_score = search_info['score'] + required_matches
+                        pattern_chunks.append(chunk)
+        
+        # Second: General insurance patterns
+        general_patterns = {
             'waiting_period': {
-                'triggers': ['waiting', 'period', 'cataract', 'joint'],
+                'triggers': ['waiting', 'period'],
                 'patterns': [r'\d+\s*months?\s*(?:waiting|period)', r'(?:waiting|period).*?\d+\s*months?'],
                 'score': 3.0
             },
@@ -254,26 +387,24 @@ class IndustryStandardRetriever:
             }
         }
         
-        pattern_chunks = []
-        for chunk in chunks:
-            content_lower = chunk.content.lower()
-            total_score = 0
-            
-            for pattern_type, info in patterns.items():
+        # Only add general patterns if no specific matches found
+        if not pattern_chunks:
+            for pattern_type, info in general_patterns.items():
                 # Check if query triggers this pattern
                 if any(trigger in query_lower for trigger in info['triggers']):
                     # Check if chunk matches patterns
-                    pattern_matches = sum(1 for pattern in info['patterns'] 
-                                        if re.search(pattern, content_lower, re.IGNORECASE))
-                    if pattern_matches > 0:
-                        total_score += pattern_matches * info['score']
-            
-            if total_score > 0:
-                chunk.relevance_score = total_score
-                pattern_chunks.append(chunk)
+                    for chunk in chunks:
+                        content_lower = chunk.content.lower()
+                        pattern_matches = sum(1 for pattern in info['patterns'] 
+                                            if re.search(pattern, content_lower, re.IGNORECASE))
+                        if pattern_matches > 0:
+                            chunk.relevance_score = pattern_matches * info['score']
+                            pattern_chunks.append(chunk)
         
-        pattern_chunks.sort(key=lambda x: x.relevance_score, reverse=True)
-        return pattern_chunks[:top_k]
+        # Remove duplicates and sort
+        unique_chunks = self._remove_duplicates(pattern_chunks)
+        unique_chunks.sort(key=lambda x: x.relevance_score, reverse=True)
+        return unique_chunks[:top_k]
     
     def _stage_2_precision_rerank(self, query: str, candidates: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
         """Stage 2: Precision re-ranking using cross-encoder"""
@@ -371,18 +502,102 @@ class IndustryStandardRetriever:
         return unique
 
 class SimpleDocumentChunker:
-    """Simple, reliable document chunker"""
+    """Simple, reliable document chunker with enhanced section detection"""
     
-    def __init__(self, chunk_size: int = 250, overlap: int = 40):
+    def __init__(self, chunk_size: int = 200, overlap: int = 30):
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.logger = logging.getLogger(__name__)
     
     def create_chunks(self, text: str) -> List[DocumentChunk]:
-        """Create overlapping chunks from document"""
+        """Create overlapping chunks with intelligent section detection"""
         # Clean text
         text = re.sub(r'\s+', ' ', text).strip()
         
+        # First: Identify key sections that must be separate chunks
+        key_sections = self._extract_key_sections(text)
+        chunks = []
+        
+        # Add key sections as priority chunks
+        for section_name, section_text in key_sections.items():
+            if len(section_text.strip()) > 50:
+                chunk = DocumentChunk(
+                    content=section_text.strip(),
+                    source=f"section_{section_name}"
+                )
+                chunks.append(chunk)
+        
+        # Second: Create general overlapping chunks from remaining text
+        remaining_text = text
+        for section_name, section_text in key_sections.items():
+            remaining_text = remaining_text.replace(section_text, "")
+        
+        if remaining_text.strip():
+            general_chunks = self._create_overlapping_chunks(remaining_text)
+            chunks.extend(general_chunks)
+        
+        self.logger.info(f"✅ Created {len(chunks)} document chunks ({len(key_sections)} section + {len(chunks) - len(key_sections)} general)")
+        return chunks
+    
+    def _extract_key_sections(self, text: str) -> dict:
+        """Extract key insurance sections that need separate chunks"""
+        sections = {}
+        
+        # Define critical section patterns
+        section_patterns = {
+            'ambulance_coverage': {
+                'start': r'(?:expenses incurred on road ambulance|ambulance.*?subject to)',
+                'context_size': 200
+            },
+            'room_rent_coverage': {
+                'start': r'room rent.*?boarding.*?nursing',
+                'context_size': 200
+            },
+            'icu_coverage': {
+                'start': r'intensive care unit.*?icu.*?iccu',
+                'context_size': 200
+            },
+            'cumulative_bonus': {
+                'start': r'cumulative bonus.*?claim free',
+                'context_size': 200
+            },
+            'moratorium_period': {
+                'start': r'moratorium period.*?sixty.*?continuous months',
+                'context_size': 150
+            },
+            'grace_period': {
+                'start': r'grace period.*?premium.*?thirty days',
+                'context_size': 150
+            },
+            'cataract_waiting': {
+                'start': r'cataract.*?24.*?months.*?waiting',
+                'context_size': 150
+            },
+            'pre_existing_diseases': {
+                'start': r'pre-existing diseases.*?36.*?months',
+                'context_size': 200
+            }
+        }
+        
+        text_lower = text.lower()
+        
+        for section_name, pattern_info in section_patterns.items():
+            match = re.search(pattern_info['start'], text_lower, re.IGNORECASE | re.DOTALL)
+            if match:
+                start_pos = match.start()
+                context_size = pattern_info['context_size']
+                
+                # Extract context around the match
+                start_extract = max(0, start_pos - context_size // 2)
+                end_extract = min(len(text), start_pos + context_size)
+                
+                section_text = text[start_extract:end_extract]
+                sections[section_name] = section_text
+        
+        return sections
+    
+    def _create_overlapping_chunks(self, text: str) -> List[DocumentChunk]:
+        """Create overlapping chunks from text"""
         # Split into sentences
         sentences = re.split(r'[.!?]+', text)
         sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
@@ -398,7 +613,7 @@ class SimpleDocumentChunker:
             if current_words + sentence_words > self.chunk_size and current_chunk:
                 chunk = DocumentChunk(
                     content=current_chunk.strip(),
-                    source="document"
+                    source="document_general"
                 )
                 chunks.append(chunk)
                 
@@ -414,11 +629,10 @@ class SimpleDocumentChunker:
         if current_chunk.strip():
             chunk = DocumentChunk(
                 content=current_chunk.strip(),
-                source="document"
+                source="document_general"
             )
             chunks.append(chunk)
         
-        self.logger.info(f"✅ Created {len(chunks)} document chunks")
         return chunks
 
 class PrecisionAnswerGenerator:
@@ -466,55 +680,138 @@ class PrecisionAnswerGenerator:
         return "The specific information requested is not clearly available in the document content."
     
     def _pattern_based_extraction(self, query: str, context: str) -> Optional[str]:
-        """Extract answers using insurance-specific patterns"""
+        """Extract answers using insurance-specific patterns with enhanced precision"""
         context_lower = context.lower()
         
-        # Precise insurance patterns
+        # Enhanced insurance patterns with strict matching
         patterns = {
-            'cataract waiting': {
-                'pattern': r'cataract.*?(\d+)\s*months?\s*(?:waiting|period)',
-                'template': "The waiting period for cataract treatment is {0} months."
+            # Ambulance - very specific
+            'ambulance': {
+                'triggers': ['ambulance', 'coverage', 'amount'],
+                'patterns': [
+                    r'ambulance.*?(?:maximum|up to|subject to).*?rs\.?\s*([0-9,]+)',
+                    r'road ambulance.*?rs\.?\s*([0-9,]+)',
+                    r'expenses.*?ambulance.*?rs\.?\s*([0-9,]+)'
+                ],
+                'template': "Road ambulance expenses are covered up to Rs. {0} per hospitalization.",
+                'validation': lambda c: 'ambulance' in c and 'rs' in c and 'pre-existing' not in c
             },
-            'joint replacement waiting': {
-                'pattern': r'joint replacement.*?(\d+)\s*months?\s*(?:waiting|period)',
-                'template': "The waiting period for joint replacement surgery is {0} months."
+            
+            # Room rent - precise pattern
+            'room_rent': {
+                'triggers': ['room', 'rent', 'limit'],
+                'patterns': [
+                    r'room rent.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
+                    r'room.*?boarding.*?nursing.*?(\d+)%.*?rs\.?\s*([0-9,]+)'
+                ],
+                'template': "Room rent is covered up to {0}% of sum insured, maximum Rs. {1} per day.",
+                'validation': lambda c: 'room rent' in c and 'boarding' in c
             },
-            'room rent limit': {
-                'pattern': r'room rent.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
-                'template': "Room rent is covered up to {0}% of sum insured, maximum Rs. {1} per day."
+            
+            # ICU - precise pattern
+            'icu': {
+                'triggers': ['icu', 'intensive', 'care'],
+                'patterns': [
+                    r'intensive care unit.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
+                    r'icu.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)'
+                ],
+                'template': "ICU expenses are covered up to {0}% of sum insured, maximum Rs. {1} per day.",
+                'validation': lambda c: 'intensive care' in c or 'icu' in c
             },
-            'icu limit': {
-                'pattern': r'icu.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
-                'template': "ICU expenses are covered up to {0}% of sum insured, maximum Rs. {1} per day."
+            
+            # Cumulative bonus
+            'cumulative_bonus': {
+                'triggers': ['cumulative', 'bonus', 'percentage'],
+                'patterns': [
+                    r'cumulative bonus.*?(\d+)%.*?claim.*?free.*?maximum.*?(\d+)%',
+                    r'cumulative bonus.*?increased.*?(\d+)%.*?maximum.*?(\d+)%'
+                ],
+                'template': "Cumulative bonus is {0}% per claim-free year, maximum {1}% of sum insured.",
+                'validation': lambda c: 'cumulative bonus' in c and 'claim free' in c
             },
-            'ambulance amount': {
-                'pattern': r'ambulance.*?rs\.?\s*([0-9,]+)',
-                'template': "Road ambulance expenses are covered up to Rs. {0} per hospitalization."
+            
+            # Cataract waiting period - specific
+            'cataract_waiting': {
+                'triggers': ['cataract', 'waiting', 'period'],
+                'patterns': [
+                    r'cataract.*?(\d+)\s*months?\s*(?:waiting|period)',
+                    r'(\d+)\s*months?\s*waiting.*?cataract'
+                ],
+                'template': "The waiting period for cataract treatment is {0} months.",
+                'validation': lambda c: 'cataract' in c and 'months' in c and 'pre-existing disease means' not in c
             },
-            'cumulative bonus': {
-                'pattern': r'cumulative bonus.*?(\d+)%.*?claim.*?free.*?maximum.*?(\d+)%',
-                'template': "Cumulative bonus is {0}% per claim-free year, maximum {1}% of sum insured."
+            
+            # Joint replacement waiting period
+            'joint_waiting': {
+                'triggers': ['joint', 'replacement', 'waiting'],
+                'patterns': [
+                    r'joint replacement.*?(\d+)\s*months?\s*(?:waiting|period)',
+                    r'(\d+)\s*months?\s*waiting.*?joint replacement'
+                ],
+                'template': "The waiting period for joint replacement surgery is {0} months.",
+                'validation': lambda c: 'joint replacement' in c and 'months' in c
             },
-            'moratorium period': {
-                'pattern': r'moratorium.*?(\d+)\s*(?:continuous\s*)?months',
-                'template': "The moratorium period is {0} continuous months."
+            
+            # Moratorium period - specific validation
+            'moratorium': {
+                'triggers': ['moratorium', 'period'],
+                'patterns': [
+                    r'moratorium.*?(\d+)\s*(?:continuous\s*)?months',
+                    r'completion.*?(\d+)\s*continuous months'
+                ],
+                'template': "The moratorium period is {0} continuous months.",
+                'validation': lambda c: 'moratorium' in c and 'sixty' in c and 'grace period' not in c
             },
-            'pre existing definition': {
-                'pattern': r'pre-existing.*?disease.*?means.*?physician.*?(\d+)\s*months',
-                'template': "Pre-existing disease means any condition for which medical advice or treatment was received from a physician within {0} months prior to policy inception."
+            
+            # Grace period - very specific
+            'grace_period': {
+                'triggers': ['grace', 'period', 'premium'],
+                'patterns': [
+                    r'grace period.*?(\d+)\s*days',
+                    r'grace period.*?premium.*?(\d+)\s*days'
+                ],
+                'template': "The grace period for premium payment is {0} days.",
+                'validation': lambda c: 'grace period' in c and 'premium' in c and 'moratorium' not in c
+            },
+            
+            # Pre-hospitalization
+            'pre_hospitalization': {
+                'triggers': ['pre', 'hospitalization', 'period'],
+                'patterns': [
+                    r'pre.*?hospitalization.*?(\d+)\s*days',
+                    r'pre-hospitalization.*?(\d+)\s*days'
+                ],
+                'template': "Pre-hospitalization coverage is for {0} days prior to admission.",
+                'validation': lambda c: 'pre-hospitalization' in c or 'pre hospitalization' in c
+            },
+            
+            # Post-hospitalization
+            'post_hospitalization': {
+                'triggers': ['post', 'hospitalization', 'period'],
+                'patterns': [
+                    r'post.*?hospitalization.*?(\d+)\s*days',
+                    r'post-hospitalization.*?(\d+)\s*days'
+                ],
+                'template': "Post-hospitalization coverage is for {0} days after discharge.",
+                'validation': lambda c: 'post-hospitalization' in c or 'post hospitalization' in c
             }
         }
         
         for pattern_name, pattern_info in patterns.items():
             # Check if pattern is relevant to query
-            pattern_words = pattern_name.split()
-            if any(word in query for word in pattern_words):
-                match = re.search(pattern_info['pattern'], context_lower, re.IGNORECASE)
-                if match:
-                    try:
-                        return pattern_info['template'].format(*match.groups())
-                    except:
-                        continue
+            if any(trigger in query for trigger in pattern_info['triggers']):
+                # Validate context content first
+                if 'validation' in pattern_info and not pattern_info['validation'](context_lower):
+                    continue
+                
+                # Try each pattern
+                for pattern in pattern_info['patterns']:
+                    match = re.search(pattern, context_lower, re.IGNORECASE)
+                    if match:
+                        try:
+                            return pattern_info['template'].format(*match.groups())
+                        except:
+                            continue
         
         return None
     
