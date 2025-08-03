@@ -866,7 +866,7 @@ class Mission10_DocumentProcessor:
 # Initialize mission system
 mission_processor = Mission10_DocumentProcessor()
 
-@app.post("/hackrx", response_model=HackRxResponse)
+@app.post("/hackrx/run", response_model=HackRxResponse)
 async def process_document_questions(
     request: HackRxRequest,
     token: str = Depends(verify_token)
