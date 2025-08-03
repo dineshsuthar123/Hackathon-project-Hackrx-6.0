@@ -371,103 +371,164 @@ class IndustryStandardRetriever:
         return unique
 
 class SimpleDocumentChunker:
-    """Simple, reliable document chunker with proper list handling"""
+    """Robust document chunker with intelligent text processing"""
     
-    def __init__(self, chunk_size: int = 200, overlap: int = 30):
+    def __init__(self, chunk_size: int = 150, overlap: int = 25):
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.logger = logging.getLogger(__name__)
     
     def create_chunks(self, text: str) -> List[DocumentChunk]:
-        """Create overlapping chunks with special handling for annexures and lists"""
-        # Clean text
-        text = re.sub(r'\s+', ' ', text).strip()
+        """Create clean, meaningful chunks from document"""
+        # Clean and normalize text
+        text = self._clean_document_text(text)
         
-        # CRITICAL FIX: Handle Annexure-A separately to prevent giant chunks
-        if "ANNEXURE-A" in text or "List I – List of which coverage is not available" in text:
-            return self._create_smart_chunks_with_annexure_handling(text)
+        # CRITICAL: Filter out annexure noise before chunking
+        text = self._remove_annexure_pollution(text)
         
-        # Regular sentence-based chunking for normal content
-        return self._create_sentence_chunks(text)
+        # Create semantic chunks
+        chunks = self._create_semantic_chunks(text)
+        
+        self.logger.info(f"✅ Created {len(chunks)} clean chunks")
+        return chunks
     
-    def _create_smart_chunks_with_annexure_handling(self, text: str) -> List[DocumentChunk]:
-        """Handle document with annexure lists intelligently"""
-        chunks = []
+    def _clean_document_text(self, text: str) -> str:
+        """Clean and normalize document text"""
+        # Normalize whitespace but preserve word boundaries
+        text = re.sub(r'\s+', ' ', text)
         
-        # AGGRESSIVE FIX: Remove entire annexure sections before processing
-        # Split at annexure and only keep content before it
-        annexure_split = re.split(r'(ANNEXURE-A|List I –|Annexure -A)', text, flags=re.IGNORECASE)
+        # Fix common OCR/PDF extraction issues more carefully
+        text = re.sub(r'\b([a-z])\s+([a-z])\b', r'\1\2', text)  # Fix "t reatment" -> "treatment"
+        text = re.sub(r'(\d+)\s*%', r'\1%', text)  # Fix "25 %" -> "25%"
+        text = re.sub(r'Rs\s*\.?\s*(\d)', r'Rs. \1', text)  # Fix "Rs 5000" -> "Rs. 5000"
+        text = re.sub(r'INR\s*(\d)', r'INR \1', text)  # Fix "INR40000" -> "INR 40000"
         
-        # Only process the content before any annexure
-        main_content = annexure_split[0] if annexure_split else text
+        return text.strip()
+    
+    def _remove_annexure_pollution(self, text: str) -> str:
+        """Aggressively remove all annexure and list pollution"""
+        # Remove everything after annexure markers
+        annexure_patterns = [
+            r'ANNEXURE[-\s]*A.*$',
+            r'List I.*coverage is not available.*$',
+            r'List II.*subsumed into Room Charges.*$',
+            r'CBD\s*-\s*81.*New Town.*Kolkata.*$'
+        ]
         
-        # Additional filtering for any remaining problematic patterns
-        lines = main_content.split('\n')
+        for pattern in annexure_patterns:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
+        
+        # Remove noisy list items and page headers/footers
+        lines = text.split('\n')
         clean_lines = []
         
         for line in lines:
             line = line.strip()
-            # Skip lines that are clearly from lists or annexures
-            if (len(line) < 5 or 
-                re.match(r'^\d+\s+[A-Z][A-Z\s/]+$', line) or  # List items like "1 BABY FOOD"
-                'BABY FOOD' in line or 
-                'AMBULANCE COLLAR' in line or
-                'VASOFIX SAFETY' in line or
-                line.startswith('Sl Item')):
+            
+            # Skip problematic patterns
+            if (len(line) < 10 or
+                re.match(r'^\d+\s+[A-Z\s/]+$', line) or  # List items "1 BABY FOOD"
+                'BABY FOOD' in line or 'AMBULANCE COLLAR' in line or
+                line.startswith('Sl Item') or
+                line.startswith('Page ') or
+                'National UIN:' in line or
+                'CBD -81' in line):
                 continue
+            
             clean_lines.append(line)
         
-        clean_content = '\n'.join(clean_lines)
-        
-        if clean_content.strip():
-            # Process the clean content
-            section_chunks = self._create_sentence_chunks(clean_content)
-            chunks.extend(section_chunks)
-        
-        self.logger.info(f"✅ Created {len(chunks)} chunks (aggressive annexure filtering)")
-        return chunks
+        return '\n'.join(clean_lines)
     
-    def _create_sentence_chunks(self, text: str) -> List[DocumentChunk]:
-        """Create sentence-based chunks for normal content"""
-        # Split into sentences
-        sentences = re.split(r'[.!?]+', text)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
+    def _create_semantic_chunks(self, text: str) -> List[DocumentChunk]:
+        """Create semantically meaningful chunks"""
+        # Split into sections first
+        sections = self._identify_sections(text)
         
         chunks = []
+        for section_title, section_content in sections:
+            if len(section_content.strip()) < 20:
+                continue
+            
+            # Create chunks within each section
+            section_chunks = self._chunk_section(section_content, section_title)
+            chunks.extend(section_chunks)
+        
+        return chunks
+    
+    def _identify_sections(self, text: str) -> List[tuple]:
+        """Identify logical sections in the document"""
+        sections = []
+        
+        # Common section patterns
+        section_patterns = [
+            r'(\d+\.?\s*COVERAGE\b.*?)(?=\d+\.|\Z)',
+            r'(\d+\.?\s*CUMULATIVE BONUS.*?)(?=\d+\.|\Z)',
+            r'(\d+\.?\s*WAITING PERIOD.*?)(?=\d+\.|\Z)',
+            r'(\d+\.?\s*DEFINITIONS.*?)(?=\d+\.|\Z)',
+            r'(\d+\.?\s*EXCLUSIONS.*?)(?=\d+\.|\Z)',
+            r'(\d+\.?\s*CLAIM PROCEDURE.*?)(?=\d+\.|\Z)',
+            r'(Moratorium Period:.*?)(?=\d+\.|\Z)',
+            r'(Grace Period.*?)(?=\d+\.|\Z)',
+            r'(Pre-Existing Disease.*?)(?=\d+\.|\Z)'
+        ]
+        
+        remaining_text = text
+        for pattern in section_patterns:
+            matches = re.finditer(pattern, remaining_text, re.IGNORECASE | re.DOTALL)
+            for match in matches:
+                section_content = match.group(1).strip()
+                section_title = section_content.split('\n')[0].strip()
+                sections.append((section_title, section_content))
+                remaining_text = remaining_text.replace(section_content, '', 1)
+        
+        # Add any remaining content as a general section
+        if remaining_text.strip():
+            sections.append(("General", remaining_text.strip()))
+        
+        return sections
+    
+    def _chunk_section(self, content: str, section_title: str) -> List[DocumentChunk]:
+        """Create focused chunks within a section"""
+        chunks = []
+        
+        # Split into logical units (sentences/paragraphs)
+        units = re.split(r'[.!?]+|\n\n+', content)
+        units = [u.strip() for u in units if len(u.strip()) > 15]
+        
         current_chunk = ""
         current_words = 0
         
-        for sentence in sentences:
-            sentence_words = len(sentence.split())
+        for unit in units:
+            unit_words = len(unit.split())
             
-            # If adding this sentence exceeds chunk size, create chunk
-            if current_words + sentence_words > self.chunk_size and current_chunk:
+            # If adding this unit exceeds chunk size, create chunk
+            if current_words + unit_words > self.chunk_size and current_chunk:
                 chunk = DocumentChunk(
                     content=current_chunk.strip(),
-                    source="document"
+                    source=section_title
                 )
                 chunks.append(chunk)
                 
                 # Start new chunk with overlap
                 overlap_words = current_chunk.split()[-self.overlap:]
-                current_chunk = " ".join(overlap_words) + " " + sentence + ". "
+                current_chunk = " ".join(overlap_words) + " " + unit + ". "
                 current_words = len(current_chunk.split())
             else:
-                current_chunk += sentence + ". "
-                current_words += sentence_words
+                current_chunk += unit + ". "
+                current_words += unit_words
         
         # Add final chunk
         if current_chunk.strip():
             chunk = DocumentChunk(
                 content=current_chunk.strip(),
-                source="document"
+                source=section_title
             )
             chunks.append(chunk)
         
         return chunks
 
 class PrecisionAnswerGenerator:
-    """Generate precise answers from ranked chunks"""
+    """Generate precise, human-readable answers from ranked chunks"""
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
@@ -477,122 +538,186 @@ class PrecisionAnswerGenerator:
         if not chunks:
             return "The requested information is not available in the document."
         
-        # Combine top chunks
-        context = self._combine_chunks(chunks[:3])  # Use only top 3
+        # Combine and clean context
+        context = self._prepare_context(chunks[:3])
         
         # Extract precise answer using multiple strategies
         answer = self._extract_precise_answer(query, context)
         
+        # Clean and validate the answer
+        answer = self._clean_answer(answer)
+        
         return answer
     
-    def _combine_chunks(self, chunks: List[DocumentChunk]) -> str:
-        """Combine chunks into coherent context"""
-        return "\n\n".join([chunk.content for chunk in chunks])
+    def _prepare_context(self, chunks: List[DocumentChunk]) -> str:
+        """Prepare clean context from chunks"""
+        context_parts = []
+        
+        for chunk in chunks:
+            # Clean chunk content
+            content = chunk.content.strip()
+            
+            # Remove incomplete sentences at start/end
+            sentences = re.split(r'[.!?]+', content)
+            complete_sentences = []
+            
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if len(sentence) > 10 and sentence[0].isupper():
+                    complete_sentences.append(sentence)
+            
+            if complete_sentences:
+                clean_content = '. '.join(complete_sentences) + '.'
+                context_parts.append(clean_content)
+        
+        return ' '.join(context_parts)
     
     def _extract_precise_answer(self, query: str, context: str) -> str:
         """Extract most relevant answer using multiple strategies"""
         query_lower = query.lower()
         
-        # Strategy 1: Specific pattern matching for insurance queries
-        pattern_answer = self._pattern_based_extraction(query_lower, context)
-        if pattern_answer:
-            return pattern_answer
+        # Strategy 1: Direct pattern matching for specific questions
+        direct_answer = self._direct_pattern_extraction(query_lower, context)
+        if direct_answer:
+            return direct_answer
         
-        # Strategy 2: Direct fact extraction
-        fact_answer = self._extract_key_facts(query_lower, context)
-        if fact_answer:
-            return fact_answer
+        # Strategy 2: Number and amount extraction
+        numeric_answer = self._extract_numeric_facts(query_lower, context)
+        if numeric_answer:
+            return numeric_answer
         
-        # Strategy 3: Best sentence selection
+        # Strategy 3: Definition extraction
+        definition_answer = self._extract_definitions(query_lower, context)
+        if definition_answer:
+            return definition_answer
+        
+        # Strategy 4: Best relevant sentence
         sentence_answer = self._select_best_sentence(query_lower, context)
         if sentence_answer:
             return sentence_answer
         
-        return "The specific information requested is not clearly available in the document content."
+        return "The specific information requested is not clearly available in the document."
     
-    def _pattern_based_extraction(self, query: str, context: str) -> Optional[str]:
-        """Extract answers using insurance-specific patterns"""
+    def _direct_pattern_extraction(self, query: str, context: str) -> Optional[str]:
+        """Extract direct answers for common insurance questions"""
         context_lower = context.lower()
         
-        # Precise insurance patterns
+        # Specific question patterns with precise extraction
         patterns = {
-            'cataract waiting': {
-                'pattern': r'cataract.*?(\d+)\s*months?\s*(?:waiting|period)',
-                'template': "The waiting period for cataract treatment is {0} months."
+            'ambulance': {
+                'triggers': ['ambulance', 'coverage', 'amount'],
+                'pattern': r'ambulance.*?(?:maximum|up to|subject to).*?rs\.?\s*([0-9,]+)',
+                'answer': "Road ambulance expenses are covered up to Rs. {0} per hospitalization."
             },
-            'joint replacement waiting': {
-                'pattern': r'joint replacement.*?(\d+)\s*months?\s*(?:waiting|period)',
-                'template': "The waiting period for joint replacement surgery is {0} months."
-            },
-            'room rent limit': {
+            'room_rent': {
+                'triggers': ['room', 'rent', 'limit'],
                 'pattern': r'room rent.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
-                'template': "Room rent is covered up to {0}% of sum insured, maximum Rs. {1} per day."
+                'answer': "Room rent is covered up to {0}% of sum insured, maximum Rs. {1} per day."
             },
-            'icu limit': {
+            'icu': {
+                'triggers': ['icu', 'intensive', 'care'],
                 'pattern': r'icu.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
-                'template': "ICU expenses are covered up to {0}% of sum insured, maximum Rs. {1} per day."
+                'answer': "ICU expenses are covered up to {0}% of sum insured, maximum Rs. {1} per day."
             },
-            'ambulance amount': {
-                'pattern': r'ambulance.*?rs\.?\s*([0-9,]+)',
-                'template': "Road ambulance expenses are covered up to Rs. {0} per hospitalization."
-            },
-            'cumulative bonus': {
+            'cumulative_bonus': {
+                'triggers': ['cumulative', 'bonus', 'percentage'],
                 'pattern': r'cumulative bonus.*?(\d+)%.*?claim.*?free.*?maximum.*?(\d+)%',
-                'template': "Cumulative bonus is {0}% per claim-free year, maximum {1}% of sum insured."
+                'answer': "Cumulative bonus is {0}% per claim-free year, maximum {1}% of sum insured."
             },
-            'moratorium period': {
+            'cataract_waiting': {
+                'triggers': ['cataract', 'waiting', 'period'],
+                'pattern': r'cataract.*?(\d+)\s*months?\s*(?:waiting|period)',
+                'answer': "The waiting period for cataract treatment is {0} months."
+            },
+            'joint_waiting': {
+                'triggers': ['joint', 'replacement', 'waiting'],
+                'pattern': r'joint replacement.*?(\d+)\s*months?\s*(?:waiting|period)',
+                'answer': "The waiting period for joint replacement surgery is {0} months."
+            },
+            'moratorium': {
+                'triggers': ['moratorium', 'period'],
                 'pattern': r'moratorium.*?(\d+)\s*(?:continuous\s*)?months',
-                'template': "The moratorium period is {0} continuous months."
+                'answer': "The moratorium period is {0} continuous months."
             },
-            'pre existing definition': {
-                'pattern': r'pre-existing.*?disease.*?means.*?physician.*?(\d+)\s*months',
-                'template': "Pre-existing disease means any condition for which medical advice or treatment was received from a physician within {0} months prior to policy inception."
+            'grace_period': {
+                'triggers': ['grace', 'period', 'premium'],
+                'pattern': r'grace period.*?(\d+)\s*days',
+                'answer': "The grace period for premium payment is {0} days."
+            },
+            'pre_hospitalization': {
+                'triggers': ['pre', 'hospitalization', 'period'],
+                'pattern': r'pre.*?hospitalization.*?(\d+)\s*days',
+                'answer': "Pre-hospitalization coverage is for {0} days prior to admission."
+            },
+            'post_hospitalization': {
+                'triggers': ['post', 'hospitalization', 'period'],
+                'pattern': r'post.*?hospitalization.*?(\d+)\s*days',
+                'answer': "Post-hospitalization coverage is for {0} days after discharge."
             }
         }
         
         for pattern_name, pattern_info in patterns.items():
-            # Check if pattern is relevant to query
-            pattern_words = pattern_name.split()
-            if any(word in query for word in pattern_words):
+            # Check if query triggers this pattern
+            if any(trigger in query for trigger in pattern_info['triggers']):
                 match = re.search(pattern_info['pattern'], context_lower, re.IGNORECASE)
                 if match:
                     try:
-                        return pattern_info['template'].format(*match.groups())
+                        return pattern_info['answer'].format(*match.groups())
                     except:
                         continue
         
         return None
     
-    def _extract_key_facts(self, query: str, context: str) -> Optional[str]:
-        """Extract key facts with numbers/amounts"""
-        # Look for sentences with specific information
+    def _extract_numeric_facts(self, query: str, context: str) -> Optional[str]:
+        """Extract answers with specific numbers or amounts"""
+        # Look for sentences with relevant numbers
         sentences = re.split(r'[.!?]+', context)
         
+        query_words = set(re.findall(r'\b\w{3,}\b', query))
+        
         for sentence in sentences:
-            sentence = sentence.strip()
-            if len(sentence) < 20:
+            if len(sentence.strip()) < 15:
                 continue
             
             sentence_lower = sentence.lower()
+            sentence_words = set(re.findall(r'\b\w{3,}\b', sentence_lower))
             
-            # Check if sentence contains query-relevant information
-            query_words = re.findall(r'\b\w{3,}\b', query)
-            word_matches = sum(1 for word in query_words if word in sentence_lower)
+            # Check word overlap
+            overlap = len(query_words.intersection(sentence_words))
             
-            # Must have good word overlap and specific information
-            if word_matches >= 2 and re.search(r'\d+', sentence):
-                # Additional checks for quality
-                has_amounts = bool(re.search(r'rs\.?\s*\d+|inr\s*\d+|\d+%', sentence_lower))
-                has_timeframes = bool(re.search(r'\d+\s*(?:months?|days?|hours?)', sentence_lower))
-                has_limits = bool(re.search(r'maximum|minimum|up to|limit', sentence_lower))
+            # Must have good overlap and contain numbers
+            if overlap >= 2 and re.search(r'\d+', sentence):
+                # Check for specific value patterns
+                has_money = bool(re.search(r'rs\.?\s*\d+|inr\s*\d+', sentence_lower))
+                has_percentage = bool(re.search(r'\d+%', sentence))
+                has_time = bool(re.search(r'\d+\s*(?:days?|months?|years?)', sentence_lower))
                 
-                if has_amounts or has_timeframes or has_limits:
-                    return sentence
+                if has_money or has_percentage or has_time:
+                    return sentence.strip()
+        
+        return None
+    
+    def _extract_definitions(self, query: str, context: str) -> Optional[str]:
+        """Extract definition-style answers"""
+        if any(word in query for word in ['means', 'definition', 'defined', 'what is']):
+            # Look for definition patterns
+            definition_patterns = [
+                r'([^.]*?\bmeans\b[^.]*?\.)',
+                r'([^.]*?\bdefined as\b[^.]*?\.)',
+                r'([^.]*?\brefers to\b[^.]*?\.)'
+            ]
+            
+            for pattern in definition_patterns:
+                match = re.search(pattern, context, re.IGNORECASE)
+                if match:
+                    definition = match.group(1).strip()
+                    if len(definition) > 20:
+                        return definition
         
         return None
     
     def _select_best_sentence(self, query: str, context: str) -> Optional[str]:
-        """Select the most relevant sentence from context"""
+        """Select the most relevant complete sentence"""
         sentences = re.split(r'[.!?]+', context)
         query_words = set(re.findall(r'\b\w{3,}\b', query))
         
@@ -600,24 +725,51 @@ class PrecisionAnswerGenerator:
         best_score = 0
         
         for sentence in sentences:
-            if len(sentence.strip()) < 30:
+            sentence = sentence.strip()
+            if len(sentence) < 20:
                 continue
             
             sentence_words = set(re.findall(r'\b\w{3,}\b', sentence.lower()))
             overlap = len(query_words.intersection(sentence_words))
             
-            # Boost for specific information
+            # Score based on relevance
             score = overlap
             if re.search(r'\d+', sentence):
                 score += 1
-            if any(term in sentence.lower() for term in ['rs.', 'maximum', 'minimum', '%', 'limit']):
+            if any(term in sentence.lower() for term in ['rs.', 'maximum', 'minimum', '%', 'limit', 'coverage']):
                 score += 0.5
+            
+            # Prefer shorter, more focused sentences
+            if len(sentence) < 100:
+                score += 0.3
             
             if score > best_score and score >= 2:
                 best_score = score
-                best_sentence = sentence.strip()
+                best_sentence = sentence
         
         return best_sentence
+    
+    def _clean_answer(self, answer: str) -> str:
+        """Clean and validate the final answer"""
+        if not answer:
+            return "The requested information is not available in the document."
+        
+        # Clean up common issues
+        answer = re.sub(r'\s+', ' ', answer).strip()
+        
+        # Ensure proper sentence ending
+        if not answer.endswith(('.', '!', '?')):
+            answer += '.'
+        
+        # Capitalize first letter
+        if answer and answer[0].islower():
+            answer = answer[0].upper() + answer[1:]
+        
+        # Remove incomplete fragments
+        if len(answer) < 10:
+            return "The requested information is not clearly available in the document."
+        
+        return answer
 
 class IndustryStandardDocumentProcessor:
     """Complete industry-standard document processing pipeline"""
