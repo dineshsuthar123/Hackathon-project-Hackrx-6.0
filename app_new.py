@@ -514,11 +514,15 @@ class SimpleDocumentChunker:
         # Clean text
         text = re.sub(r'\s+', ' ', text).strip()
         
-        # First: Identify key sections that must be separate chunks
-        key_sections = self._extract_key_sections(text)
+        self.logger.info(f"📄 Processing document: {len(text)} characters")
+        
+        # Create chunks using multiple strategies
         chunks = []
         
-        # Add key sections as priority chunks
+        # Strategy 1: Try to extract key sections first
+        key_sections = self._extract_key_sections(text)
+        section_chunks_created = 0
+        
         for section_name, section_text in key_sections.items():
             if len(section_text.strip()) > 50:
                 chunk = DocumentChunk(
@@ -526,112 +530,221 @@ class SimpleDocumentChunker:
                     source=f"section_{section_name}"
                 )
                 chunks.append(chunk)
+                section_chunks_created += 1
         
-        # Second: Create general overlapping chunks from remaining text
-        remaining_text = text
-        for section_name, section_text in key_sections.items():
-            remaining_text = remaining_text.replace(section_text, "")
+        # Strategy 2: Create general chunks from the full text (always do this)
+        general_chunks = self._create_overlapping_chunks(text)
+        chunks.extend(general_chunks)
         
-        if remaining_text.strip():
-            general_chunks = self._create_overlapping_chunks(remaining_text)
-            chunks.extend(general_chunks)
+        # Strategy 3: If we have too few chunks, create smaller chunks
+        if len(chunks) < 5:
+            self.logger.warning(f"Only {len(chunks)} chunks created, creating smaller chunks...")
+            smaller_chunks = self._create_smaller_chunks(text, chunk_size=150, overlap=25)
+            chunks.extend(smaller_chunks)
         
-        self.logger.info(f"✅ Created {len(chunks)} document chunks ({len(key_sections)} section + {len(chunks) - len(key_sections)} general)")
+        # Remove duplicates
+        unique_chunks = self._remove_duplicate_chunks(chunks)
+        
+        self.logger.info(f"✅ Created {len(unique_chunks)} document chunks ({section_chunks_created} section + {len(unique_chunks) - section_chunks_created} general)")
+        return unique_chunks
+    
+    def _create_smaller_chunks(self, text: str, chunk_size: int = 150, overlap: int = 25) -> List[DocumentChunk]:
+        """Create smaller chunks for better coverage"""
+        words = text.split()
+        chunks = []
+        
+        for i in range(0, len(words), chunk_size - overlap):
+            chunk_words = words[i:i + chunk_size]
+            if len(chunk_words) > 20:  # Minimum chunk size
+                chunk_text = " ".join(chunk_words)
+                chunk = DocumentChunk(
+                    content=chunk_text,
+                    source="document_small"
+                )
+                chunks.append(chunk)
+        
         return chunks
+    
+    def _remove_duplicate_chunks(self, chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+        """Remove duplicate chunks while preserving variety"""
+        seen = set()
+        unique = []
+        
+        for chunk in chunks:
+            # Create a signature based on the first 100 characters
+            signature = chunk.content[:100].lower().strip()
+            if signature not in seen:
+                seen.add(signature)
+                unique.append(chunk)
+        
+        return unique
     
     def _extract_key_sections(self, text: str) -> dict:
         """Extract key insurance sections that need separate chunks"""
         sections = {}
+        text_lower = text.lower()
         
-        # Define critical section patterns
+        # Enhanced section patterns for real PDF content
         section_patterns = {
             'ambulance_coverage': {
-                'start': r'(?:expenses incurred on road ambulance|ambulance.*?subject to)',
-                'context_size': 200
+                'patterns': [
+                    r'(?:expenses incurred on road ambulance|ambulance.*?subject to|road ambulance.*?covered)',
+                    r'ambulance.*?rs\.?\s*[0-9,]+',
+                    r'emergency ambulance.*?coverage'
+                ],
+                'context_size': 300
             },
             'room_rent_coverage': {
-                'start': r'room rent.*?boarding.*?nursing',
-                'context_size': 200
+                'patterns': [
+                    r'room rent.*?boarding.*?nursing',
+                    r'accommodation.*?charges.*?room',
+                    r'private room.*?charges'
+                ],
+                'context_size': 300
             },
             'icu_coverage': {
-                'start': r'intensive care unit.*?icu.*?iccu',
-                'context_size': 200
+                'patterns': [
+                    r'intensive care unit.*?icu.*?iccu',
+                    r'icu.*?expenses.*?coverage',
+                    r'critical care.*?unit.*?charges'
+                ],
+                'context_size': 300
             },
             'cumulative_bonus': {
-                'start': r'cumulative bonus.*?claim free',
-                'context_size': 200
+                'patterns': [
+                    r'cumulative bonus.*?claim free',
+                    r'no claim.*?bonus',
+                    r'bonus.*?renewal.*?claim'
+                ],
+                'context_size': 250
             },
             'moratorium_period': {
-                'start': r'moratorium period.*?sixty.*?continuous months',
-                'context_size': 150
+                'patterns': [
+                    r'moratorium period.*?sixty.*?continuous months',
+                    r'moratorium.*?60.*?months',
+                    r'incontestability.*?period'
+                ],
+                'context_size': 250
             },
             'grace_period': {
-                'start': r'grace period.*?premium.*?thirty days',
-                'context_size': 150
-            },
-            'cataract_waiting': {
-                'start': r'cataract.*?24.*?months.*?waiting',
-                'context_size': 150
-            },
-            'pre_existing_diseases': {
-                'start': r'pre-existing diseases.*?36.*?months',
+                'patterns': [
+                    r'grace period.*?premium.*?thirty days',
+                    r'grace.*?30.*?days.*?premium',
+                    r'premium.*?grace.*?period'
+                ],
                 'context_size': 200
+            },
+            'waiting_periods': {
+                'patterns': [
+                    r'waiting period.*?(?:24|36).*?months',
+                    r'(?:24|36).*?months.*?waiting',
+                    r'pre-existing.*?diseases.*?waiting'
+                ],
+                'context_size': 400
+            },
+            'definitions': {
+                'patterns': [
+                    r'definitions?.*?(?:means|defined as)',
+                    r'hospital.*?means.*?institution',
+                    r'pre-existing disease.*?means'
+                ],
+                'context_size': 300
             }
         }
         
-        text_lower = text.lower()
-        
         for section_name, pattern_info in section_patterns.items():
-            match = re.search(pattern_info['start'], text_lower, re.IGNORECASE | re.DOTALL)
-            if match:
-                start_pos = match.start()
-                context_size = pattern_info['context_size']
-                
-                # Extract context around the match
-                start_extract = max(0, start_pos - context_size // 2)
-                end_extract = min(len(text), start_pos + context_size)
-                
-                section_text = text[start_extract:end_extract]
-                sections[section_name] = section_text
+            for pattern in pattern_info['patterns']:
+                match = re.search(pattern, text_lower, re.IGNORECASE | re.DOTALL)
+                if match:
+                    start_pos = match.start()
+                    context_size = pattern_info['context_size']
+                    
+                    # Extract context around the match
+                    start_extract = max(0, start_pos - context_size // 2)
+                    end_extract = min(len(text), start_pos + context_size)
+                    
+                    section_text = text[start_extract:end_extract]
+                    
+                    # Only add if we haven't found this section yet
+                    if section_name not in sections:
+                        sections[section_name] = section_text
+                        break  # Found this section, move to next
         
         return sections
     
     def _create_overlapping_chunks(self, text: str) -> List[DocumentChunk]:
-        """Create overlapping chunks from text"""
-        # Split into sentences
-        sentences = re.split(r'[.!?]+', text)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
-        
+        """Create overlapping chunks from text with better handling of large documents"""
         chunks = []
-        current_chunk = ""
-        current_words = 0
         
-        for sentence in sentences:
-            sentence_words = len(sentence.split())
+        # If text is very large, split by paragraphs first
+        if len(text) > 10000:
+            paragraphs = re.split(r'\n\s*\n', text)
+            paragraphs = [p.strip() for p in paragraphs if len(p.strip()) > 50]
             
-            # If adding this sentence exceeds chunk size, create chunk
-            if current_words + sentence_words > self.chunk_size and current_chunk:
+            current_chunk = ""
+            current_words = 0
+            
+            for paragraph in paragraphs:
+                paragraph_words = len(paragraph.split())
+                
+                # If adding this paragraph exceeds chunk size, create chunk
+                if current_words + paragraph_words > self.chunk_size and current_chunk:
+                    chunk = DocumentChunk(
+                        content=current_chunk.strip(),
+                        source="document_general"
+                    )
+                    chunks.append(chunk)
+                    
+                    # Start new chunk with overlap
+                    overlap_words = current_chunk.split()[-self.overlap:]
+                    current_chunk = " ".join(overlap_words) + " " + paragraph
+                    current_words = len(current_chunk.split())
+                else:
+                    current_chunk += " " + paragraph
+                    current_words += paragraph_words
+            
+            # Add final chunk
+            if current_chunk.strip():
                 chunk = DocumentChunk(
                     content=current_chunk.strip(),
                     source="document_general"
                 )
                 chunks.append(chunk)
-                
-                # Start new chunk with overlap
-                overlap_words = current_chunk.split()[-self.overlap:]
-                current_chunk = " ".join(overlap_words) + " " + sentence + ". "
-                current_words = len(current_chunk.split())
-            else:
-                current_chunk += sentence + ". "
-                current_words += sentence_words
         
-        # Add final chunk
-        if current_chunk.strip():
-            chunk = DocumentChunk(
-                content=current_chunk.strip(),
-                source="document_general"
-            )
-            chunks.append(chunk)
+        else:
+            # For smaller texts, use sentence-based chunking
+            sentences = re.split(r'[.!?]+', text)
+            sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
+            
+            current_chunk = ""
+            current_words = 0
+            
+            for sentence in sentences:
+                sentence_words = len(sentence.split())
+                
+                # If adding this sentence exceeds chunk size, create chunk
+                if current_words + sentence_words > self.chunk_size and current_chunk:
+                    chunk = DocumentChunk(
+                        content=current_chunk.strip(),
+                        source="document_general"
+                    )
+                    chunks.append(chunk)
+                    
+                    # Start new chunk with overlap
+                    overlap_words = current_chunk.split()[-self.overlap:]
+                    current_chunk = " ".join(overlap_words) + " " + sentence + ". "
+                    current_words = len(current_chunk.split())
+                else:
+                    current_chunk += sentence + ". "
+                    current_words += sentence_words
+            
+            # Add final chunk
+            if current_chunk.strip():
+                chunk = DocumentChunk(
+                    content=current_chunk.strip(),
+                    source="document_general"
+                )
+                chunks.append(chunk)
         
         return chunks
 
