@@ -15,18 +15,15 @@ python-multipart==0.0.6
 # Basic ML support for production deployment
 numpy==1.24.3
 
-# Advanced ML components (optional - uncomment for full features)
-# sentence-transformers==2.2.2
-# scikit-learn==1.3.2
-# transformers==4.35.2
+# Advanced ML components (ENABLED for LLM features)
+sentence-transformers==2.2.2
+scikit-learn==1.3.2
+transformers==4.35.2
 
-# LLM Enhancement (optional - for improved answer quality)
-# torch>=2.0.0
-# transformers>=4.35.0
-# ollama-python>=0.1.0
+# LLM Enhancement (ENABLED for improved answer quality)
+torch>=2.0.0
+transformers>=4.35.0
+ollama-python>=0.1.0
 
-# Uncomment for production LLM features:
-# sentence-transformers==2.2.2
-# scikit-learn==1.3.2
-# torch>=2.0.0
-# transformers>=4.35.0
+# Production LLM features ENABLED:
+accelerate>=0.20.0

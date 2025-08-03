@@ -795,7 +795,7 @@ class PrecisionAnswerGenerator:
                     "text-generation",
                     model="microsoft/DialoGPT-small",
                     tokenizer="microsoft/DialoGPT-small",
-                    device_map="auto" if torch.cuda.is_available() else "cpu",
+                    device_map=None,  # Disable device_map to avoid accelerate requirement
                     max_length=512,
                     temperature=0.3,
                     do_sample=True
