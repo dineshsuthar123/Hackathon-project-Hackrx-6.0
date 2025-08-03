@@ -900,75 +900,50 @@ class PrecisionAnswerGenerator:
         return None
 
     def _pattern_based_extraction(self, query: str, context: str) -> Optional[str]:
-        """Extract answers using insurance-specific patterns with enhanced precision - ULTRA PRECISE"""
+        """Extract answers using insurance-specific patterns - SIMPLIFIED AND WORKING"""
         context_lower = context.lower()
+        query_lower = query.lower()
         
-        # ULTRA-PRECISE insurance patterns with strict validation
-        patterns = {
-            'ambulance': {
-                'triggers': ['ambulance', 'coverage', 'amount'],
-                'patterns': [
-                    r'ambulance.*?(?:maximum|up to|subject to).*?rs\.?\s*([0-9,]+)',
-                    r'road ambulance.*?rs\.?\s*([0-9,]+)',
-                    r'expenses.*?ambulance.*?rs\.?\s*([0-9,]+)'
-                ],
-                'template': "Road ambulance expenses are covered up to Rs. {0} per hospitalization.",
-                'validation': lambda c, v: 'ambulance' in c and v in ['2000', '2,000'] and 'cbd' not in c and 'kolkata' not in c
-            },
-            'room_rent': {
-                'triggers': ['room', 'rent', 'limit'],
-                'patterns': [
-                    r'room rent.*?boarding.*?nursing.*?(\d+)%.*?sum insured',
-                    r'room rent.*?(\d+)%.*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)'
-                ],
-                'template': "Room rent is covered up to {0}% of sum insured, maximum Rs. {1} per day.",
-                'validation': lambda c, v: 'room rent' in c and 'boarding' in c and v in ['2'] and 'cbd' not in c
-            },
-            'cumulative_bonus': {
-                'triggers': ['cumulative', 'bonus', 'percentage'],
-                'patterns': [
-                    r'cumulative bonus.*?increased.*?(\d+)%.*?respect.*?claim.*?free',
-                    r'cumulative bonus.*?(\d+)%.*?claim.*?free.*?maximum.*?(\d+)%'
-                ],
-                'template': "Cumulative bonus is {0}% per claim-free year, maximum {1}% of sum insured.",
-                'validation': lambda c, v: 'cumulative bonus' in c and v in ['5'] and 'cbd' not in c
-            },
-            'cataract_waiting': {
-                'triggers': ['cataract', 'waiting', 'period'],
-                'patterns': [
-                    r'cataract.*?(\d+)\s*(?:twenty four|24)\s*months?\s*(?:waiting|period)',
-                    r'(\d+)\s*months?\s*waiting.*?cataract'
-                ],
-                'template': "The waiting period for cataract treatment is {0} months.",
-                'validation': lambda c, v: 'cataract' in c and v in ['24'] and 'pre-existing disease means' not in c
-            },
-            'grace_period': {
-                'triggers': ['grace', 'period', 'premium'],
-                'patterns': [
-                    r'grace period.*?premium.*?(\d+)\s*(?:thirty|30)\s*days',
-                    r'grace period.*?(\d+)\s*days'
-                ],
-                'template': "The grace period for premium payment is {0} days.",
-                'validation': lambda c, v: 'grace period' in c and 'premium' in c and v in ['30'] and 'cbd' not in c
-            }
-        }
+        # Ambulance coverage
+        if any(word in query_lower for word in ['ambulance', 'transport']):
+            patterns = [
+                r'ambulance.*?rs\.?\s*([0-9,]+)',
+                r'road ambulance.*?rs\.?\s*([0-9,]+)',
+                r'expenses.*?ambulance.*?rs\.?\s*([0-9,]+)'
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, context_lower)
+                if match:
+                    amount = match.group(1)
+                    return f"Road ambulance expenses are covered up to Rs. {amount} per hospitalization."
         
-        for pattern_name, pattern_info in patterns.items():
-            # Check if pattern is relevant to query
-            if any(trigger in query for trigger in pattern_info['triggers']):
-                # Try each pattern
-                for pattern in pattern_info['patterns']:
-                    match = re.search(pattern, context_lower, re.IGNORECASE)
-                    if match:
-                        try:
-                            groups = match.groups()
-                            if groups and groups[0]:
-                                # STRICT VALIDATION: Check if this is the correct value
-                                value = groups[0].replace(',', '')
-                                if 'validation' in pattern_info and pattern_info['validation'](context_lower, value):
-                                    return pattern_info['template'].format(*groups)
-                        except:
-                            continue
+        # Room rent coverage
+        if any(word in query_lower for word in ['room', 'rent', 'boarding']):
+            match = re.search(r'room rent.*?(\d+)%.*?sum insured', context_lower)
+            if match:
+                percentage = match.group(1)
+                return f"Room rent is covered up to {percentage}% of sum insured per day."
+        
+        # Cumulative bonus
+        if any(word in query_lower for word in ['cumulative', 'bonus']):
+            match = re.search(r'cumulative bonus.*?(\d+)%.*?claim.*?free', context_lower)
+            if match:
+                percentage = match.group(1)
+                return f"Cumulative bonus is {percentage}% per claim-free year."
+        
+        # Cataract waiting period
+        if any(word in query_lower for word in ['cataract', 'waiting']):
+            match = re.search(r'cataract.*?(\d+)\s*months', context_lower)
+            if match:
+                months = match.group(1)
+                return f"The waiting period for cataract treatment is {months} months."
+        
+        # Grace period
+        if any(word in query_lower for word in ['grace', 'premium']):
+            match = re.search(r'grace period.*?(\d+)\s*days', context_lower)
+            if match:
+                days = match.group(1)
+                return f"The grace period for premium payment is {days} days."
         
         return None
     
