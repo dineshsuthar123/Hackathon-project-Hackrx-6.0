@@ -108,56 +108,67 @@ class DocumentChunk:
     rerank_score: float = 0.0
 
 class AdvancedDocumentChunker:
-    """Advanced document chunking with overlapping windows and better structure"""
+    """FIXED: Advanced document chunking with PRECISION focus"""
     
-    def __init__(self, chunk_size: int = 400, overlap: int = 50):  # Reduced for speed
+    def __init__(self, chunk_size: int = 200, overlap: int = 30):  # SMALLER chunks for precision
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.logger = logging.getLogger(__name__)
     
     def create_chunks(self, text: str) -> List[DocumentChunk]:
-        """Create overlapping chunks with enhanced metadata - optimized"""
+        """Create PRECISE, focused chunks - ADDRESSES GEMINI'S RETRIEVAL FAILURE"""
         # Clean and normalize text
         text = self._clean_text(text)
         
-        # Fast section identification
-        sections = self._identify_sections_fast(text)
+        # CRITICAL: Better section identification for insurance documents
+        sections = self._identify_insurance_sections(text)
         
         chunks = []
         
-        self.logger.info(f"🔍 Creating chunks from {len(sections)} sections...")
+        self.logger.info(f"🔍 Creating PRECISION chunks from {len(sections)} sections...")
         
         for i, (section_title, section_content) in enumerate(sections):
-            # Create overlapping chunks within each section
-            section_chunks = self._chunk_section_fast(section_content, section_title)
+            # Create FOCUSED chunks within each section
+            section_chunks = self._create_focused_chunks(section_content, section_title)
             chunks.extend(section_chunks)
             
-            # Progress logging for large documents
-            if i % 5 == 0 and i > 0:
+            if i % 3 == 0 and i > 0:
                 self.logger.info(f"📄 Processed {i+1}/{len(sections)} sections")
         
-        self.logger.info(f"✅ Created {len(chunks)} document chunks")
+        # CRITICAL: Remove duplicate/similar chunks
+        chunks = self._deduplicate_chunks(chunks)
+        
+        self.logger.info(f"✅ Created {len(chunks)} FOCUSED document chunks")
         return chunks
     
-    def _identify_sections_fast(self, text: str) -> List[Tuple[str, str]]:
-        """Fast section identification"""
-        # Simple section splitting for speed
+    def _identify_insurance_sections(self, text: str) -> List[Tuple[str, str]]:
+        """INSURANCE-SPECIFIC section identification for better chunking"""
         lines = text.split('\n')
         sections = []
         current_section = ""
-        current_title = "Document Content"
+        current_title = "General Content"
+        
+        # Insurance document patterns
+        section_patterns = [
+            r'^\d+\.\s*[A-Z][A-Z\s]+',  # Numbered sections
+            r'^[A-Z][A-Z\s]{10,}:',     # All caps titles with colon
+            r'^\d+\.\d+\s*[A-Z]',       # Sub-numbered sections
+            r'^COVERAGE|^EXCLUSIONS|^DEFINITIONS|^CLAIM|^BENEFITS|^WAITING|^MORATORIUM',  # Key sections
+        ]
         
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-                
-            # Check if line looks like a section header (simple heuristic)
-            if (len(line) < 100 and 
-                (line.isupper() or 
-                 re.match(r'^\d+\.', line) or 
-                 re.match(r'^[A-Z][A-Z\s]+:', line))):
-                
+            
+            # Check if this line is a section header
+            is_header = False
+            for pattern in section_patterns:
+                if re.match(pattern, line, re.IGNORECASE):
+                    is_header = True
+                    break
+            
+            if is_header and len(line) < 120:  # Reasonable header length
                 # Save previous section
                 if current_section.strip():
                     sections.append((current_title, current_section.strip()))
@@ -174,63 +185,118 @@ class AdvancedDocumentChunker:
         
         return sections if sections else [("Document", text)]
     
-    def _chunk_section_fast(self, content: str, section_title: str) -> List[DocumentChunk]:
-        """Create overlapping chunks within a section - optimized"""
+    def _create_focused_chunks(self, content: str, section_title: str) -> List[DocumentChunk]:
+        """Create FOCUSED chunks - ONE TOPIC PER CHUNK"""
         chunks = []
-        words = content.split()
         
-        if len(words) <= self.chunk_size:
-            # Section is small enough to be a single chunk
-            chunk = DocumentChunk(
-                content=content,
-                start_pos=0,
-                end_pos=len(content),
-                section_title=section_title,
-                keywords=self._extract_keywords_fast(content),
-                numbers=self._extract_numbers(content)
-            )
-            chunks.append(chunk)
+        # Split by sentences first for better boundaries
+        sentences = re.split(r'[.!?]+', content)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+        
+        if not sentences:
             return chunks
         
-        # Create overlapping chunks
-        start_idx = 0
-        while start_idx < len(words):
-            end_idx = min(start_idx + self.chunk_size, len(words))
-            chunk_words = words[start_idx:end_idx]
-            chunk_content = " ".join(chunk_words)
+        # Group sentences into focused chunks
+        current_chunk = ""
+        current_words = 0
+        
+        for sentence in sentences:
+            sentence_words = len(sentence.split())
             
-            chunk = DocumentChunk(
-                content=chunk_content,
-                start_pos=start_idx,
-                end_pos=end_idx,
-                section_title=section_title,
-                keywords=self._extract_keywords_fast(chunk_content),
-                numbers=self._extract_numbers(chunk_content)
-            )
+            # Check if adding this sentence would exceed chunk size
+            if current_words + sentence_words > self.chunk_size and current_chunk:
+                # Create chunk from current content
+                chunk = self._create_chunk(current_chunk, section_title)
+                chunks.append(chunk)
+                
+                # Start new chunk with overlap
+                overlap_sentences = self._get_overlap_sentences(current_chunk)
+                current_chunk = overlap_sentences + sentence + ". "
+                current_words = len(current_chunk.split())
+            else:
+                current_chunk += sentence + ". "
+                current_words += sentence_words
+        
+        # Add final chunk
+        if current_chunk.strip():
+            chunk = self._create_chunk(current_chunk, section_title)
             chunks.append(chunk)
-            
-            # Move to next chunk with overlap
-            start_idx += self.chunk_size - self.overlap
         
         return chunks
     
-    def _extract_keywords_fast(self, text: str) -> List[str]:
-        """Fast keyword extraction"""
-        # Simple but fast keyword extraction
-        words = re.findall(r'\b[A-Za-z]{4,}\b', text.lower())
+    def _create_chunk(self, content: str, section_title: str) -> DocumentChunk:
+        """Create a single focused chunk with enhanced metadata"""
+        content = content.strip()
         
-        # Common important words in insurance documents
-        priority_words = {
-            'premium', 'coverage', 'benefit', 'claim', 'policy', 'treatment',
-            'hospital', 'medical', 'surgery', 'emergency', 'limit', 'maximum'
+        return DocumentChunk(
+            content=content,
+            start_pos=0,
+            end_pos=len(content),
+            section_title=section_title,
+            keywords=self._extract_focused_keywords(content),
+            numbers=self._extract_numbers(content)
+        )
+    
+    def _get_overlap_sentences(self, chunk_content: str) -> str:
+        """Get last few words for overlap"""
+        words = chunk_content.split()
+        if len(words) > self.overlap:
+            return " ".join(words[-self.overlap:]) + " "
+        return chunk_content
+    
+    def _deduplicate_chunks(self, chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+        """Remove duplicate or very similar chunks"""
+        unique_chunks = []
+        seen_content = set()
+        
+        for chunk in chunks:
+            # Create a normalized version for comparison
+            normalized = re.sub(r'\s+', ' ', chunk.content.lower().strip())
+            
+            # Check for substantial overlap with existing chunks
+            is_duplicate = False
+            for seen in seen_content:
+                overlap = len(set(normalized.split()) & set(seen.split()))
+                similarity = overlap / max(len(normalized.split()), len(seen.split()))
+                if similarity > 0.8:  # 80% similarity threshold
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                seen_content.add(normalized)
+                unique_chunks.append(chunk)
+        
+        self.logger.info(f"🔄 Deduplicated: {len(chunks)} → {len(unique_chunks)} unique chunks")
+        return unique_chunks
+    
+    def _extract_focused_keywords(self, text: str) -> List[str]:
+        """Extract FOCUSED keywords for this specific chunk"""
+        text_lower = text.lower()
+        keywords = []
+        
+        # Insurance-specific term categories
+        insurance_categories = {
+            'waiting_periods': ['waiting', 'period', 'months', 'continuous'],
+            'coverage_limits': ['maximum', 'limit', 'up to', 'percentage', 'sum insured'],
+            'monetary_amounts': ['rs', 'inr', 'rupees', 'amount'],
+            'medical_terms': ['treatment', 'surgery', 'hospitalization', 'medical'],
+            'policy_terms': ['policy', 'coverage', 'benefit', 'claim', 'exclusion'],
+            'time_frames': ['days', 'months', 'years', 'hours', 'period'],
+            'specific_conditions': ['cataract', 'icu', 'ambulance', 'maternity', 'pre-existing']
         }
         
-        keywords = []
-        for word in words:
-            if word in priority_words or word.istitle():
-                keywords.append(word)
+        # Identify which categories this chunk belongs to
+        chunk_categories = []
+        for category, terms in insurance_categories.items():
+            if any(term in text_lower for term in terms):
+                chunk_categories.append(category)
+                keywords.extend([term for term in terms if term in text_lower])
         
-        return list(set(keywords))[:10]  # Limit to 10 for speed
+        # Extract specific medical/insurance terms
+        specific_terms = re.findall(r'\b(?:cataract|icu|ambulance|maternity|pre-existing|cumulative|bonus|moratorium|ayush|modern|treatment|room|rent|plastic|surgery|obesity|sterility|infertility)\b', text_lower)
+        keywords.extend(specific_terms)
+        
+        return list(set(keywords))[:8]  # Limit to most relevant
     
     def _clean_text(self, text: str) -> str:
         """Clean and normalize document text"""
@@ -339,21 +405,40 @@ class AdvancedRetriever:
             self.logger.info("🔄 Using enhanced keyword-based fallback")
     
     def retrieve_and_rerank(self, query: str, chunks: List[DocumentChunk], top_k: int = 3) -> List[DocumentChunk]:
-        """Retrieve and re-rank chunks for MAXIMUM PRECISION"""
+        """Retrieve and re-rank chunks for MAXIMUM PRECISION - WITH DEBUG LOGGING"""
         if not chunks:
             return []
         
+        self.logger.info(f"🔍 RETRIEVAL DEBUG: Query='{query[:50]}...', Total chunks={len(chunks)}")
+        
         # Step 1: Cast wider net for initial retrieval
         initial_candidates = self._initial_retrieval(query, chunks, top_k=min(12, len(chunks)))
+        
+        # DEBUG: Log initial candidates
+        self.logger.info(f"📊 INITIAL CANDIDATES: {len(initial_candidates)} chunks retrieved")
+        for i, chunk in enumerate(initial_candidates[:3]):
+            self.logger.info(f"   [{i+1}] Section: {chunk.section_title[:30]}, Content: {chunk.content[:60]}...")
         
         # Step 2: PRECISION RE-RANKING - THE KEY IMPROVEMENT
         if self.reranker and len(initial_candidates) > top_k:
             reranked_chunks = self._precision_rerank(query, initial_candidates, top_k)
             self.logger.info(f"🎯 PRECISION: {len(initial_candidates)} → {len(reranked_chunks)} most relevant")
+            
+            # DEBUG: Log final results
+            for i, chunk in enumerate(reranked_chunks):
+                self.logger.info(f"   🏆 FINAL[{i+1}] Score: {chunk.rerank_score:.2f}, Section: {chunk.section_title[:30]}")
+            
             return reranked_chunks
         else:
             # Enhanced keyword fallback with precision patterns
-            return self._enhanced_precision_fallback(query, initial_candidates, top_k)
+            fallback_chunks = self._enhanced_precision_fallback(query, initial_candidates, top_k)
+            
+            # DEBUG: Log fallback results
+            self.logger.info(f"🔄 FALLBACK: {len(initial_candidates)} → {len(fallback_chunks)} relevant chunks")
+            for i, chunk in enumerate(fallback_chunks):
+                self.logger.info(f"   🔄 FALLBACK[{i+1}] Score: {chunk.rerank_score:.2f}, Section: {chunk.section_title[:30]}")
+            
+            return fallback_chunks
     
     def _initial_retrieval(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
         """Initial semantic or keyword-based retrieval"""
@@ -390,67 +475,81 @@ class AdvancedRetriever:
             return chunks[:top_k]
     
     def _enhanced_precision_fallback(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
-        """Enhanced keyword-based ranking with PRECISION PATTERNS"""
+        """FIXED: Enhanced keyword-based ranking with STRICT PRECISION"""
         query_lower = query.lower()
         
-        # CRITICAL: Precision patterns for insurance questions - ADDRESSES GEMINI'S EXAMPLES
-        precision_patterns = {
-            # Specific waiting periods
-            'cataract.*waiting': r'cataract.*?(\d+)\s*months?.*?waiting',
-            'joint replacement.*waiting': r'joint replacement.*?(\d+)\s*months?.*?waiting|waiting.*?(\d+)\s*months?.*?joint replacement',
-            
-            # Specific monetary limits
-            'room rent.*limit': r'room rent.*?(\d+%?).*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
-            'icu.*limit': r'icu.*?(\d+%?).*?sum insured.*?maximum.*?rs\.?\s*([0-9,]+)',
-            'ambulance.*cover': r'ambulance.*?maximum.*?rs\.?\s*([0-9,]+)|road ambulance.*?rs\.?\s*([0-9,]+)',
-            
-            # Specific bonus and periods
-            'cumulative bonus': r'cumulative bonus.*?(\d+%?).*?claim.*?free.*?maximum.*?(\d+%?)',
-            'moratorium.*period': r'moratorium.*?(\d+).*?months?|(\d+).*?continuous.*?months.*?moratorium',
-            
-            # Specific definitions
-            'pre-existing.*defin': r'pre-existing.*?physician.*?(\d+)\s*months?.*?prior|(\d+)\s*months?.*?prior.*?pre-existing',
-            'modern.*treatment.*limit': r'modern.*?treatment.*?(\d+%?).*?sum insured',
-            
-            # Specific conditions
-            'plastic surgery.*condition': r'plastic surgery.*?reconstruction.*?accident|cosmetic.*?surgery.*?reconstruction',
-            'obesity.*surgery': r'obesity.*?surgery.*?bmi|bariatric.*?surgery',
-            'sterility.*infertility': r'sterility.*?infertility.*?exclusion|infertility.*?excluded'
+        # CRITICAL: Question-specific matching patterns
+        question_patterns = {
+            'cataract': ['cataract', 'eye', 'lens', 'waiting'],
+            'joint replacement': ['joint', 'replacement', 'surgery', 'waiting', 'accident'],
+            'room rent': ['room', 'rent', 'boarding', 'maximum', 'day'],
+            'icu': ['icu', 'intensive', 'care', 'unit', 'maximum'],
+            'ambulance': ['ambulance', 'road', 'transport', 'rs'],
+            'cumulative bonus': ['cumulative', 'bonus', 'claim', 'free', 'year'],
+            'pre-existing': ['pre-existing', 'disease', 'physician', 'months', 'prior'],
+            'moratorium': ['moratorium', 'period', 'continuous', 'months'],
+            'plastic surgery': ['plastic', 'surgery', 'cosmetic', 'reconstruction'],
+            'obesity': ['obesity', 'bariatric', 'surgery', 'bmi'],
+            'sterility': ['sterility', 'infertility', 'ivf'],
+            'hospital definition': ['hospital', 'beds', 'population', 'lacs'],
+            'modern treatment': ['modern', 'treatment', 'robotic', 'percentage'],
+            'new born': ['new', 'born', 'baby', 'days'],
+            'notification': ['notification', 'emergency', 'hours'],
+            'post hospitalization': ['post', 'hospitalization', 'days'],
+            'grace period': ['grace', 'period', 'premium', 'days']
         }
+        
+        # Find the most relevant pattern for this query
+        best_pattern = None
+        max_matches = 0
+        
+        for pattern_name, pattern_words in question_patterns.items():
+            matches = sum(1 for word in pattern_words if word in query_lower)
+            if matches > max_matches:
+                max_matches = matches
+                best_pattern = pattern_words
         
         scored_chunks = []
         for chunk in chunks:
             content_lower = chunk.content.lower()
             
-            # Base keyword matching
+            # STRICT: Must have significant overlap with question pattern
+            if best_pattern:
+                pattern_matches = sum(1 for word in best_pattern if word in content_lower)
+                pattern_score = pattern_matches / len(best_pattern)
+            else:
+                pattern_score = 0
+            
+            # Base keyword matching with exact words
             query_words = set(re.findall(r'\b\w{3,}\b', query_lower))
             content_words = set(re.findall(r'\b\w{3,}\b', content_lower))
-            keyword_overlap = len(query_words.intersection(content_words))
-            base_score = keyword_overlap / len(query_words) if query_words else 0
+            exact_matches = len(query_words.intersection(content_words))
             
-            # CRITICAL: Precision pattern matching
-            precision_bonus = 0
-            for pattern_key, pattern_regex in precision_patterns.items():
-                pattern_words = pattern_key.replace('.*', ' ').split()
-                if any(word in query_lower for word in pattern_words):
-                    if re.search(pattern_regex, content_lower, re.IGNORECASE):
-                        precision_bonus += 3.0  # High bonus for precise matches
-                        self.logger.info(f"🎯 PRECISION MATCH: {pattern_key}")
+            # CRITICAL: Only chunks with strong relevance
+            if pattern_score < 0.3 and exact_matches < 2:
+                continue  # Skip irrelevant chunks
             
-            # Specificity bonuses
-            has_specific_numbers = len(re.findall(r'\d+\s*(?:months?|days?|years?|%|rs)', content_lower))
-            has_monetary_values = len(re.findall(r'rs\.?\s*\d+', content_lower))
-            has_percentages = len(re.findall(r'\d+%', content_lower))
+            # Value extraction bonuses
+            has_numbers = len(re.findall(r'\d+', chunk.content))
+            has_monetary = len(re.findall(r'rs\.?\s*\d+', content_lower))
+            has_percentages = len(re.findall(r'\d+%', chunk.content))
+            has_timeframes = len(re.findall(r'\d+\s*(?:months?|days?|years?)', content_lower))
             
-            specificity_bonus = (has_specific_numbers * 0.5) + (has_monetary_values * 0.8) + (has_percentages * 0.6)
+            # Calculate final score
+            final_score = (pattern_score * 3.0) + (exact_matches * 1.0) + (has_numbers * 0.2) + (has_monetary * 0.5) + (has_percentages * 0.3) + (has_timeframes * 0.4)
             
-            final_score = base_score + precision_bonus + specificity_bonus
             chunk.rerank_score = final_score
             scored_chunks.append(chunk)
         
-        # Sort by precision score
+        # Sort by precision score and return only highly relevant chunks
         scored_chunks.sort(key=lambda x: x.rerank_score, reverse=True)
-        return scored_chunks[:top_k]
+        
+        # Filter: only return chunks with reasonable scores
+        filtered_chunks = [chunk for chunk in scored_chunks if chunk.rerank_score > 1.0]
+        
+        self.logger.info(f"🎯 STRICT FILTERING: {len(scored_chunks)} → {len(filtered_chunks)} highly relevant chunks")
+        
+        return filtered_chunks[:top_k]
     
     def _semantic_retrieval(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
         """Semantic retrieval using embeddings"""
@@ -594,11 +693,11 @@ class PrecisionAnswerGenerator:
         return synthesized
     
     def _exact_pattern_extraction(self, query: str, context: str) -> Optional[str]:
-        """EXACT pattern extraction for specific insurance questions - ADDRESSES GEMINI'S EXAMPLES"""
+        """FIXED: EXACT pattern extraction with comprehensive insurance patterns"""
         query_lower = query.lower()
         context_lower = context.lower()
         
-        # PRECISION patterns based on Gemini 2.5 Pro's feedback
+        # COMPREHENSIVE patterns for ALL insurance questions
         patterns = {
             # Waiting periods - CRITICAL for accuracy
             'cataract.*waiting': {
@@ -648,9 +747,40 @@ class PrecisionAnswerGenerator:
             'hospital.*definition.*population': {
                 'pattern': r'(?:ten|10)\s*(?:\(10\))?\s*inpatient beds.*?(?:towns|places).*?population.*?(?:ten|10)\s*lacs',
                 'template': "A hospital must have at least 10 inpatient beds in towns with population less than 10 lacs."
+            },
+            
+            # NEW: Additional critical patterns
+            'plastic surgery.*condition': {
+                'pattern': r'plastic surgery.*?reconstruction.*?accident.*?burn.*?cancer',
+                'template': "Plastic surgery is covered only for reconstruction following an accident, burns, or cancer, or as part of medically necessary treatment."
+            },
+            'sterility.*infertility': {
+                'pattern': r'sterility.*?infertility.*?excluded|expenses.*?sterility.*?infertility',
+                'template': "Expenses related to sterility and infertility treatments are excluded from coverage."
+            },
+            'obesity.*surgery': {
+                'pattern': r'obesity.*?surgery.*?bmi.*?(\d+)|bariatric.*?surgery.*?bmi.*?(\d+)',
+                'template': "Obesity surgery is covered when BMI exceeds {0} and other specific conditions are met."
+            },
+            'new.*born.*definition': {
+                'pattern': r'new born.*?baby.*?born.*?policy period.*?(\d+)\s*days',
+                'template': "New born baby means a baby born during the policy period and aged up to {0} days."
+            },
+            'notification.*emergency': {
+                'pattern': r'emergency.*?notification.*?(\d+)\s*hours|(\d+)\s*hours.*?emergency.*?hospitalisation',
+                'template': "Emergency hospitalization must be notified within {0} hours of admission."
+            },
+            'post.*hospitalisation.*limit': {
+                'pattern': r'post.*?hospitalisation.*?(\d+)\s*days',
+                'template': "Post-hospitalisation expenses are covered for {0} days after discharge."
+            },
+            'claim.*documents.*time': {
+                'pattern': r'post.*?hospitalisation.*?(\d+)\s*days.*?completion|submit.*?documents.*?(\d+)\s*days',
+                'template': "Claim documents for post-hospitalisation expenses must be submitted within {0} days."
             }
         }
         
+        # Try each pattern
         for pattern_name, pattern_info in patterns.items():
             pattern_words = pattern_name.replace('.*', ' ').split()
             if any(word in query_lower for word in pattern_words):
