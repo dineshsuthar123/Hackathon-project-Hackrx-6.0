@@ -30,7 +30,7 @@ try:
 except ImportError:
     PyPDF2 = None
 
-# LLM Integration for enhanced answer generation
+# LLM Integration for enhanced answer generation (optional in production)
 try:
     from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
     import torch
@@ -43,7 +43,6 @@ try:
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
-    PyPDF2 = None
 
 try:
     from sentence_transformers import SentenceTransformer, CrossEncoder
@@ -52,9 +51,23 @@ try:
     ADVANCED_MODELS_AVAILABLE = True
 except ImportError:
     ADVANCED_MODELS_AVAILABLE = False
+    # Fallback numpy for basic operations
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+
+# Production mode detection
+PRODUCTION_MODE = not ADVANCED_MODELS_AVAILABLE
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+import logging
+import os
+import hashlib
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -75,6 +88,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    """Log startup configuration"""
+    if PRODUCTION_MODE:
+        logger.info("🚀 PRODUCTION MODE: Lightweight deployment without ML libraries")
+        logger.info("📊 Available features: Enhanced keyword search, pattern matching, insurance-specific extraction")
+    else:
+        logger.info("🧪 DEVELOPMENT MODE: Full ML capabilities available")
+        logger.info(f"🤖 Advanced models: {ADVANCED_MODELS_AVAILABLE}")
+        logger.info(f"🦙 Ollama: {OLLAMA_AVAILABLE}")
+        logger.info(f"🤗 HuggingFace: {HF_AVAILABLE}")
 
 # Security
 security = HTTPBearer()
@@ -113,7 +138,13 @@ class IndustryStandardRetriever:
         self.setup_models()
     
     def setup_models(self):
-        """Setup industry-standard models with fallback"""
+        """Setup industry-standard models with graceful production fallback"""
+        if PRODUCTION_MODE:
+            self.logger.info("🚀 PRODUCTION MODE: Using lightweight keyword-based processing")
+            self.embedding_model = None
+            self.reranker = None
+            return
+        
         if ADVANCED_MODELS_AVAILABLE:
             try:
                 # Industry standard models
@@ -173,6 +204,9 @@ class IndustryStandardRetriever:
     
     def _semantic_search(self, query: str, chunks: List[DocumentChunk], top_k: int) -> List[DocumentChunk]:
         """Semantic similarity search using embeddings"""
+        if not self.embedding_model or PRODUCTION_MODE:
+            return []
+        
         try:
             # Create cache key
             cache_key = hashlib.md5(f"semantic_{query}_{len(chunks)}".encode()).hexdigest()
@@ -188,7 +222,13 @@ class IndustryStandardRetriever:
             similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
             
             # Rank by similarity
-            ranked_indices = np.argsort(similarities)[::-1]
+            if np is not None:
+                ranked_indices = np.argsort(similarities)[::-1]
+            else:
+                # Fallback without numpy
+                indexed_similarities = [(i, sim) for i, sim in enumerate(similarities)]
+                indexed_similarities.sort(key=lambda x: x[1], reverse=True)
+                ranked_indices = [i for i, _ in indexed_similarities]
             
             # Create results with scores
             results = []
@@ -775,7 +815,13 @@ class PrecisionAnswerGenerator:
         self.setup_llm()
     
     def setup_llm(self):
-        """Setup LLM for enhanced answer generation"""
+        """Setup LLM for enhanced answer generation - production friendly"""
+        if PRODUCTION_MODE:
+            self.logger.info("🚀 PRODUCTION MODE: LLM capabilities disabled for lightweight deployment")
+            self.llm_pipeline = None
+            self.ollama_client = None
+            return
+        
         # Try Ollama first (local, fast)
         if OLLAMA_AVAILABLE:
             try:
