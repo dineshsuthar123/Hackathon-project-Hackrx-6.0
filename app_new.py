@@ -869,12 +869,13 @@ class PrecisionAnswerGenerator:
         # Extract precise answer using multiple strategies - try all methods
         answer = self._extract_precise_answer(query, context)
         
-        # Enhance with LLM if available
-        if answer and (self.ollama_client or self.llm_pipeline):
-            enhanced_answer = self._enhance_with_llm(query, answer, context)
-            if enhanced_answer:
-                answer = enhanced_answer
-                self.logger.info("✅ LLM-enhanced answer generated")
+        # DISABLE LLM ENHANCEMENT FOR PRODUCTION - It's causing refusals
+        # Enhanced answers look like: "I can't assist with creating or providing information..."
+        # if answer and (self.ollama_client or self.llm_pipeline):
+        #     enhanced_answer = self._enhance_with_llm(query, answer, context)
+        #     if enhanced_answer:
+        #         answer = enhanced_answer
+        #         self.logger.info("✅ LLM-enhanced answer generated")
         
         # If no answer found but we have chunks, return the most relevant chunk content
         if not answer or "not available" in answer.lower():
@@ -958,10 +959,10 @@ class PrecisionAnswerGenerator:
         if any(word in query for word in ['age', 'years', 'old']):
             if 'dependent' in query or 'child' in query:
                 patterns = [
-                    r'dependent.*?child.*?(\d+)\s*(?:years|months)',
-                    r'child.*?(\d+)\s*years.*?(\d+)\s*years',
-                    r'between.*?(\d+).*?(?:months|years).*?(\d+).*?years',
-                    r'age.*?(\d+).*?(?:months|years).*?(\d+).*?years'
+                    r'dependent.*?child.*?(\d+)\s*(?:months).*?(\d+)\s*(?:years)',
+                    r'from\s*(\d+)\s*months\s*to\s*(\d+)\s*years',
+                    r'covered.*?(\d+)\s*months.*?(\d+)\s*years',
+                    r'age.*?(\d+)\s*(?:months).*?(\d+)\s*(?:years)'
                 ]
                 for pattern in patterns:
                     match = re.search(pattern, context_lower)
@@ -971,6 +972,55 @@ class PrecisionAnswerGenerator:
                             return f"The age range for dependent children is {groups[0]} months to {groups[1]} years."
                         elif len(groups) == 1:
                             return f"The maximum age for dependent children is {groups[0]} years."
+        
+        # Waiting period questions - FIXED PATTERNS
+        if any(word in query for word in ['waiting', 'period']):
+            if 'gout' in query and 'rheumatism' in query:
+                patterns = [r'gout.*?rheumatism.*?(\d+)\s*(?:months)', r'gout and rheumatism.*?(\d+)\s*months']
+                for pattern in patterns:
+                    match = re.search(pattern, context_lower)
+                    if match:
+                        return f"The waiting period for Gout and Rheumatism is {match.group(1)} months."
+            elif 'cataract' in query:
+                patterns = [r'cataract.*?(\d+)\s*months', r'-\s*cataract:\s*(\d+)\s*months']
+                for pattern in patterns:
+                    match = re.search(pattern, context_lower)
+                    if match:
+                        return f"The waiting period for cataract treatment is {match.group(1)} months."
+            else:
+                # General waiting period
+                patterns = [r'waiting.*?period.*?(\d+)\s*(?:months|years|days)']
+                for pattern in patterns:
+                    match = re.search(pattern, context_lower)
+                    if match:
+                        return f"The waiting period is {match.group(1)} months."
+        
+        # Ambulance coverage - FIXED PATTERN
+        if any(word in query for word in ['ambulance', 'coverage', 'amount']):
+            patterns = [
+                r'ambulance.*?rs\.?\s*([0-9,]+)',
+                r'road ambulance.*?maximum.*?rs\.?\s*([0-9,]+)',
+                r'expenses.*?ambulance.*?rs\.?\s*([0-9,]+)'
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, context_lower)
+                if match:
+                    amount = match.group(1)
+                    return f"Road ambulance expenses are covered up to Rs. {amount} per hospitalization."
+        
+        # Grace period - FIXED PATTERN  
+        if any(word in query for word in ['grace', 'period', 'premium']):
+            patterns = [
+                r'grace period.*?(\d+)\s*days',
+                r'grace period.*?thirty.*?days',
+                r'grace.*?thirty.*?days.*?premium'
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, context_lower)
+                if match:
+                    if match.group(1) if match.groups() else 'thirty':
+                        days = match.group(1) if match.groups() and match.group(1).isdigit() else '30'
+                        return f"The grace period for premium payment is {days} days."
         
         # Hospital/beds questions
         if any(word in query for word in ['ayush', 'hospital', 'beds', 'inpatient']):
@@ -983,18 +1033,6 @@ class PrecisionAnswerGenerator:
                 match = re.search(pattern, context_lower)
                 if match:
                     return f"AYUSH hospitals require a minimum of {match.group(1)} in-patient beds."
-        
-        # Waiting period questions
-        if any(word in query for word in ['waiting', 'period']):
-            if 'gout' in query or 'rheumatism' in query:
-                patterns = [r'gout.*?rheumatism.*?(\d+).*?(?:months|years)', r'rheumatism.*?(\d+).*?(?:months|years)']
-            else:
-                patterns = [r'waiting.*?period.*?(\d+).*?(?:months|years|days)']
-            
-            for pattern in patterns:
-                match = re.search(pattern, context_lower)
-                if match:
-                    return f"The waiting period is {match.group(1)} months."
         
         # Coverage questions
         if any(word in query for word in ['cover', 'treatment', 'expenses']):
