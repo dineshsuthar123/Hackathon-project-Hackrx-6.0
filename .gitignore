@@ -49,29 +49,19 @@ coverage.xml
 *.cover
 *.py,cover
 
-# Test files and results
-test_*.py
-test_*.json
-*_test_results.json
-demo_test_response.json
-hackrx_compliance_test.json
-
 # Backup and temporary files
 *.backup
 *.old
 *.tmp
-main_*.py
-production_server*.py
-simple_server.py
-lightweight_*.py
-advanced_*.py
-start.py
 
-# Multiple requirements files (keep only requirements.txt)
+# Multiple requirements files (keep only requirements.txt for deployment)
 requirements-*.txt
 requirements_*.txt
 
-# Deployment scripts (handled by render.yaml)
+# But keep the main requirements.txt for deployment
+!requirements.txt
+
+# Deployment scripts and extras
 deploy_*.sh
 deploy_*.ps1
 run.bat
@@ -82,9 +72,6 @@ runtime.txt
 
 # Extra documentation (keep main docs only)
 README_*.md
-STATUS.md
-TESTING_GUIDE.md
-PYTHON_VERSION_FIX.md
 
 # IDE and editor files
 .vscode/
@@ -106,60 +93,11 @@ Thumbs.db
 *.log
 logs/
 
-# Node modules (if any)
-node_modules/
-
 # Temporary directories
 tmp/
 temp/
 .hypothesis/
 .pytest_cache/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# PEP 582
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
 
 # Environments
 .env
@@ -169,39 +107,3 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Application specific
-app.log
-*.index
-*.metadata
-temp_*/
-downloads/
-api_test_response.json
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db

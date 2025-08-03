@@ -1,4 +1,4 @@
-# Deployment Requirements - Lightweight Version for 502 Fix
+# Deployment Requirements - Lightweight Version for Production
 # Core FastAPI dependencies
 fastapi==0.104.1
 uvicorn==0.24.0
@@ -12,7 +12,7 @@ PyPDF2==3.0.1
 # Essential utilities only
 python-multipart==0.0.6
 
-# Advanced ML components (commented out to fix 502 deployment issues)
+# Advanced ML components (commented out to prevent 502 deployment issues)
 # Uncomment these for full features if deployment platform supports them:
 # sentence-transformers==2.2.2
 # scikit-learn==1.3.2

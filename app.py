@@ -110,32 +110,72 @@ class DocumentChunk:
 class AdvancedDocumentChunker:
     """Advanced document chunking with overlapping windows and better structure"""
     
-    def __init__(self, chunk_size: int = 500, overlap: int = 100):
+    def __init__(self, chunk_size: int = 400, overlap: int = 50):  # Reduced for speed
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.logger = logging.getLogger(__name__)
     
     def create_chunks(self, text: str) -> List[DocumentChunk]:
-        """Create overlapping chunks with enhanced metadata"""
+        """Create overlapping chunks with enhanced metadata - optimized"""
         # Clean and normalize text
         text = self._clean_text(text)
         
-        # Identify sections first
-        sections = self._identify_sections(text)
+        # Fast section identification
+        sections = self._identify_sections_fast(text)
         
         chunks = []
-        chunk_id = 0
         
-        for section_title, section_content in sections:
+        self.logger.info(f"🔍 Creating chunks from {len(sections)} sections...")
+        
+        for i, (section_title, section_content) in enumerate(sections):
             # Create overlapping chunks within each section
-            section_chunks = self._chunk_section(section_content, section_title)
+            section_chunks = self._chunk_section_fast(section_content, section_title)
             chunks.extend(section_chunks)
+            
+            # Progress logging for large documents
+            if i % 5 == 0 and i > 0:
+                self.logger.info(f"📄 Processed {i+1}/{len(sections)} sections")
         
-        self.logger.info(f"Created {len(chunks)} document chunks")
+        self.logger.info(f"✅ Created {len(chunks)} document chunks")
         return chunks
     
-    def _chunk_section(self, content: str, section_title: str) -> List[DocumentChunk]:
-        """Create overlapping chunks within a section"""
+    def _identify_sections_fast(self, text: str) -> List[Tuple[str, str]]:
+        """Fast section identification"""
+        # Simple section splitting for speed
+        lines = text.split('\n')
+        sections = []
+        current_section = ""
+        current_title = "Document Content"
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check if line looks like a section header (simple heuristic)
+            if (len(line) < 100 and 
+                (line.isupper() or 
+                 re.match(r'^\d+\.', line) or 
+                 re.match(r'^[A-Z][A-Z\s]+:', line))):
+                
+                # Save previous section
+                if current_section.strip():
+                    sections.append((current_title, current_section.strip()))
+                
+                # Start new section
+                current_title = line
+                current_section = ""
+            else:
+                current_section += line + " "
+        
+        # Add final section
+        if current_section.strip():
+            sections.append((current_title, current_section.strip()))
+        
+        return sections if sections else [("Document", text)]
+    
+    def _chunk_section_fast(self, content: str, section_title: str) -> List[DocumentChunk]:
+        """Create overlapping chunks within a section - optimized"""
         chunks = []
         words = content.split()
         
@@ -146,34 +186,51 @@ class AdvancedDocumentChunker:
                 start_pos=0,
                 end_pos=len(content),
                 section_title=section_title,
-                keywords=self._extract_keywords(content),
+                keywords=self._extract_keywords_fast(content),
                 numbers=self._extract_numbers(content)
             )
             chunks.append(chunk)
-        else:
-            # Create overlapping chunks
-            start = 0
-            while start < len(words):
-                end = min(start + self.chunk_size, len(words))
-                chunk_words = words[start:end]
-                chunk_content = ' '.join(chunk_words)
-                
-                chunk = DocumentChunk(
-                    content=chunk_content,
-                    start_pos=start,
-                    end_pos=end,
-                    section_title=section_title,
-                    keywords=self._extract_keywords(chunk_content),
-                    numbers=self._extract_numbers(chunk_content)
-                )
-                chunks.append(chunk)
-                
-                # Move start position with overlap
-                start = end - self.overlap
-                if start >= len(words):
-                    break
+            return chunks
+        
+        # Create overlapping chunks
+        start_idx = 0
+        while start_idx < len(words):
+            end_idx = min(start_idx + self.chunk_size, len(words))
+            chunk_words = words[start_idx:end_idx]
+            chunk_content = " ".join(chunk_words)
+            
+            chunk = DocumentChunk(
+                content=chunk_content,
+                start_pos=start_idx,
+                end_pos=end_idx,
+                section_title=section_title,
+                keywords=self._extract_keywords_fast(chunk_content),
+                numbers=self._extract_numbers(chunk_content)
+            )
+            chunks.append(chunk)
+            
+            # Move to next chunk with overlap
+            start_idx += self.chunk_size - self.overlap
         
         return chunks
+    
+    def _extract_keywords_fast(self, text: str) -> List[str]:
+        """Fast keyword extraction"""
+        # Simple but fast keyword extraction
+        words = re.findall(r'\b[A-Za-z]{4,}\b', text.lower())
+        
+        # Common important words in insurance documents
+        priority_words = {
+            'premium', 'coverage', 'benefit', 'claim', 'policy', 'treatment',
+            'hospital', 'medical', 'surgery', 'emergency', 'limit', 'maximum'
+        }
+        
+        keywords = []
+        for word in words:
+            if word in priority_words or word.istitle():
+                keywords.append(word)
+        
+        return list(set(keywords))[:10]  # Limit to 10 for speed
     
     def _clean_text(self, text: str) -> str:
         """Clean and normalize document text"""
@@ -1059,52 +1116,64 @@ class AdvancedDocumentProcessor:
         self._chunk_cache = {}
     
     async def process_document_and_answer(self, document_url: str, questions: List[str]) -> List[str]:
-        """Process document and answer questions with advanced RAG pipeline"""
+        """Process document and answer questions with optimized speed"""
         cache_key = hashlib.md5(document_url.encode()).hexdigest()
         
-        # Get or create document chunks
+        # Get or create document chunks with progress logging
         if cache_key in self._chunk_cache:
             chunks = self._chunk_cache[cache_key]
-            self.logger.info("Using cached document chunks")
+            self.logger.info("⚡ Using cached document chunks")
         else:
-            # Fetch document content
+            self.logger.info("📄 Processing new document...")
+            
+            # Fetch document content with timeout optimization
             document_content = await self._fetch_document_content(document_url)
             
-            # Create chunks with advanced chunker
+            # Create chunks with progress logging
+            self.logger.info("🔍 Creating document chunks...")
             chunks = self.chunker.create_chunks(document_content)
             
             # Cache chunks
             self._chunk_cache[cache_key] = chunks
-            self.logger.info(f"Created and cached {len(chunks)} document chunks")
+            self.logger.info(f"✅ Created and cached {len(chunks)} chunks")
         
-        # Answer each question using advanced RAG
+        # Answer each question with progress tracking
         answers = []
+        total_questions = len(questions)
+        
         for i, question in enumerate(questions):
-            self.logger.info(f"Processing question {i+1}/{len(questions)}: {question[:50]}...")
+            progress = f"[{i+1}/{total_questions}]"
+            self.logger.info(f"🤔 {progress} Processing: {question[:50]}...")
             
             # Retrieve relevant chunks with re-ranking
-            relevant_chunks = self.retriever.retrieve_and_rerank(question, chunks, top_k=5)
+            relevant_chunks = self.retriever.retrieve_and_rerank(question, chunks, top_k=3)  # Reduced for speed
             
             # Generate precise answer
             answer = self.generator.generate_answer(question, relevant_chunks)
             
-            # Log answer quality
-            if "specific information" in answer.lower() or "not available" in answer.lower():
-                self.logger.warning(f"Generic answer for: {question[:30]}...")
+            # Quick quality check
+            if len(answer) < 50 or "not available" in answer.lower():
+                self.logger.warning(f"⚠️ {progress} Short answer: {question[:30]}...")
             else:
-                self.logger.info(f"Specific answer found for: {question[:30]}...")
+                self.logger.info(f"✅ {progress} Good answer: {question[:30]}...")
             
             answers.append(answer)
+            
+            # Progress feedback every 5 questions
+            if (i + 1) % 5 == 0:
+                self.logger.info(f"📊 Progress: {i+1}/{total_questions} questions completed")
         
+        self.logger.info(f"🎉 All {total_questions} questions processed successfully!")
         return answers
     
     async def _fetch_document_content(self, document_url: str) -> str:
-        """Fetch and extract text from document with robust error handling"""
+        """Fetch and extract text from document with optimized timeouts"""
         # Always try to fetch the actual document first
         if httpx:
             try:
-                self.logger.info(f"Fetching document from: {document_url}")
-                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                self.logger.info(f"⚡ Fast fetching document from: {document_url}")
+                # Reduced timeout for faster response
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     response = await client.get(document_url)
                     response.raise_for_status()
                     
@@ -1113,15 +1182,15 @@ class AdvancedDocumentProcessor:
                     
                     if 'pdf' in content_type or document_url.lower().endswith('.pdf'):
                         text_content = self._extract_pdf_text(response.content)
-                        if text_content and len(text_content.strip()) > 1000:
-                            self.logger.info(f"Successfully extracted {len(text_content)} characters from PDF")
+                        if text_content and len(text_content.strip()) > 500:  # Lowered threshold
+                            self.logger.info(f"✅ PDF processed: {len(text_content)} characters")
                             return text_content
                         else:
                             self.logger.warning("PDF extraction returned insufficient content")
                     else:
                         text_content = response.text
-                        if text_content and len(text_content.strip()) > 1000:
-                            self.logger.info(f"Successfully fetched {len(text_content)} characters")
+                        if text_content and len(text_content.strip()) > 500:  # Lowered threshold
+                            self.logger.info(f"✅ Text fetched: {len(text_content)} characters")
                             return text_content
                         
             except Exception as e:
@@ -1132,7 +1201,7 @@ class AdvancedDocumentProcessor:
         return self._get_fallback_content()
     
     def _extract_pdf_text(self, pdf_content: bytes) -> str:
-        """Extract text from PDF content with enhanced extraction"""
+        """Extract text from PDF content with optimized speed"""
         if not PyPDF2:
             self.logger.warning("PyPDF2 not available")
             return ""
@@ -1141,21 +1210,33 @@ class AdvancedDocumentProcessor:
             pdf_file = BytesIO(pdf_content)
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             
-            text_content = ""
-            self.logger.info(f"PDF has {len(pdf_reader.pages)} pages")
+            total_pages = len(pdf_reader.pages)
+            self.logger.info(f"PDF has {total_pages} pages - extracting...")
             
-            for page_num, page in enumerate(pdf_reader.pages):
+            # Limit to first 10 pages for faster processing
+            max_pages = min(10, total_pages)
+            text_content = ""
+            
+            for page_num in range(max_pages):
                 try:
+                    page = pdf_reader.pages[page_num]
                     page_text = page.extract_text()
                     if page_text:
-                        text_content += f"\n--- Page {page_num + 1} ---\n"
                         text_content += page_text + "\n"
+                    
+                    # Progress logging every 3 pages
+                    if (page_num + 1) % 3 == 0:
+                        self.logger.info(f"Processed {page_num + 1}/{max_pages} pages")
+                        
                 except Exception as e:
-                    self.logger.warning(f"Failed to extract text from page {page_num + 1}: {e}")
+                    self.logger.warning(f"Failed to extract page {page_num + 1}: {e}")
                     continue
             
+            if max_pages < total_pages:
+                self.logger.info(f"⚡ Fast mode: Processed {max_pages}/{total_pages} pages for speed")
+            
             if text_content.strip():
-                self.logger.info(f"Successfully extracted {len(text_content)} characters from PDF")
+                self.logger.info(f"✅ Extracted {len(text_content)} characters from PDF")
                 return text_content.strip()
             else:
                 self.logger.warning("No text extracted from PDF")
@@ -1318,7 +1399,17 @@ lightweight_processor = advanced_processor
 
 @app.get("/")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - quick response"""
+    return {
+        "status": "✅ healthy",
+        "version": "5.0.0-optimized",
+        "advanced_models": ADVANCED_MODELS_AVAILABLE,
+        "performance": "optimized for speed"
+    }
+
+@app.get("/health")
+async def detailed_health():
+    """Detailed health check endpoint"""
     return {
         "message": "Advanced Intelligent Document Reading System",
         "status": "healthy",
@@ -1334,7 +1425,14 @@ async def health_check():
             "Deployment optimized"
         ],
         "advanced_models": ADVANCED_MODELS_AVAILABLE,
-        "deployment": "production-ready"
+        "deployment": "production-ready",
+        "optimizations": [
+            "PDF processing limited to 10 pages",
+            "Reduced timeouts (30s)",
+            "Top-k reduced to 3 for speed",
+            "Progress logging enabled",
+            "Lower content thresholds"
+        ]
     }
 
 @app.get("/hackrx/run", response_model=HackRxResponse)
