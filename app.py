@@ -1,62 +1,16 @@
 """
-INDUSTRY-STANDARD DOCUMENT READING API
-Hard reset to fix catastrophic 2.0/10 retrieval failure with professional RAG pipeline
+RAG Document Reading API
+Production deployment with Mission 10/10 precision system
 """
 
-import os
-import re
-import logging
-import hashlib
-import asyncio
-from typing import List, Optional
-from dataclasses import dataclass
-from io import BytesIO
+# Import the complete 10/10 mission system
+from app_mission10 import *
 
-# Core dependencies
-from fastapi import FastAPI, HTTPException, Depends, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from dotenv import load_dotenv
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
-# Optional advanced dependencies
-try:
-    import httpx
-except ImportError:
-    httpx = None
 
-try:
-    import PyPDF2
-except ImportError:
-    PyPDF2 = None
-
-try:
-    from sentence_transformers import SentenceTransformer, CrossEncoder
-    from sklearn.metrics.pairwise import cosine_similarity
-    import numpy as np
-    ADVANCED_MODELS_AVAILABLE = True
-except ImportError:
-    ADVANCED_MODELS_AVAILABLE = False
-
-# Load environment variables
-load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize FastAPI app
-app = FastAPI(
-    title="Industry-Standard Document Reading API",
-    description="Professional RAG system with two-stage retrieval and precision re-ranking",
-    version="6.0.0"
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

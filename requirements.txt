@@ -1,5 +1,5 @@
-# Production Requirements - Lightweight for Render deployment
-# Only essential packages for API functionality
+# MISSION 10/10 REQUIREMENTS - PRECISION DEPLOYMENT
+# Advanced ML models included for maximum performance
 
 # Core FastAPI and server
 fastapi==0.104.1
@@ -12,12 +12,16 @@ httpx>=0.26.0
 PyPDF2==3.0.1
 python-multipart==0.0.6
 
-# Minimal ML dependencies for basic text processing
+# Essential ML for precision retrieval (optimized versions)
 numpy==1.24.3
+scikit-learn==1.3.2
 
-# DO NOT INCLUDE IN PRODUCTION - MEMORY ISSUES:
-# torch>=2.0.0                    # 800MB+ package
-# transformers>=4.35.0            # Large ML models
-# sentence-transformers==2.2.2    # Heavy embedding models
-# ollama-python>=0.1.0           # LLM client not needed for API-only
-# accelerate>=0.20.0              # GPU acceleration not available
+# Advanced semantic models for 10/10 performance
+sentence-transformers==2.2.2
+transformers>=4.35.0
+
+# Cross-encoder for precision re-ranking
+torch>=2.0.0
+
+# Additional utilities
+accelerate>=0.20.0

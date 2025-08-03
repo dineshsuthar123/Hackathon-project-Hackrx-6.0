@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "start": "uvicorn app_mission10:app --host 0.0.0.0 --port ${PORT:-8000}",
+    "dev": "uvicorn app_mission10:app --host 0.0.0.0 --port 8000 --reload",
+    "test": "python test_mission10.py"
+  },
+  "engines": {
+    "python": ">=3.8"
+  }
+}
