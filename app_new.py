@@ -30,6 +30,21 @@ try:
 except ImportError:
     PyPDF2 = None
 
+# LLM Integration for enhanced answer generation
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+    import torch
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+
+try:
+    from ollama import Client as OllamaClient
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    PyPDF2 = None
+
 try:
     from sentence_transformers import SentenceTransformer, CrossEncoder
     from sklearn.metrics.pairwise import cosine_similarity
@@ -751,10 +766,44 @@ class SimpleDocumentChunker:
         return chunks
 
 class PrecisionAnswerGenerator:
-    """Generate precise answers from ranked chunks"""
+    """Generate precise answers from ranked chunks with LLM enhancement"""
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self.llm_pipeline = None
+        self.ollama_client = None
+        self.setup_llm()
+    
+    def setup_llm(self):
+        """Setup LLM for enhanced answer generation"""
+        # Try Ollama first (local, fast)
+        if OLLAMA_AVAILABLE:
+            try:
+                self.ollama_client = OllamaClient()
+                # Test if llama model is available
+                self.ollama_client.list()
+                self.logger.info("✅ Ollama LLM available")
+            except Exception as e:
+                self.logger.warning(f"Ollama not available: {e}")
+                self.ollama_client = None
+        
+        # Fallback to HuggingFace transformers
+        if not self.ollama_client and HF_AVAILABLE:
+            try:
+                # Use a small, efficient model for local deployment
+                self.llm_pipeline = pipeline(
+                    "text-generation",
+                    model="microsoft/DialoGPT-small",
+                    tokenizer="microsoft/DialoGPT-small",
+                    device_map="auto" if torch.cuda.is_available() else "cpu",
+                    max_length=512,
+                    temperature=0.3,
+                    do_sample=True
+                )
+                self.logger.info("✅ HuggingFace LLM available")
+            except Exception as e:
+                self.logger.warning(f"HuggingFace LLM not available: {e}")
+                self.llm_pipeline = None
     
     def generate_answer(self, query: str, chunks: List[DocumentChunk]) -> str:
         """Generate precise answer from top-ranked chunks - MUCH MORE ROBUST"""
@@ -773,6 +822,13 @@ class PrecisionAnswerGenerator:
         
         # Extract precise answer using multiple strategies - try all methods
         answer = self._extract_precise_answer(query, context)
+        
+        # Enhance with LLM if available
+        if answer and (self.ollama_client or self.llm_pipeline):
+            enhanced_answer = self._enhance_with_llm(query, answer, context)
+            if enhanced_answer:
+                answer = enhanced_answer
+                self.logger.info("✅ LLM-enhanced answer generated")
         
         # If no answer found but we have chunks, return the most relevant chunk content
         if not answer or "not available" in answer.lower():
@@ -1174,6 +1230,53 @@ class PrecisionAnswerGenerator:
                 best_sentence = sentence.strip()
         
         return best_sentence
+    
+    def _enhance_with_llm(self, query: str, initial_answer: str, context: str) -> Optional[str]:
+        """Enhance answer using LLM for better quality and completeness"""
+        try:
+            # Create a prompt for the LLM
+            prompt = f"""Based on the following insurance policy document context, improve and complete this answer to the question.
+
+Question: {query}
+
+Initial Answer: {initial_answer}
+
+Context: {context[:1000]}...
+
+Please provide a clear, complete, and accurate answer based on the context. Keep it concise but informative:"""
+
+            # Try Ollama first (if available)
+            if self.ollama_client:
+                try:
+                    response = self.ollama_client.generate(
+                        model="llama3.2:1b",  # Use smaller model for speed
+                        prompt=prompt,
+                        options={
+                            "temperature": 0.1,
+                            "max_tokens": 150,
+                            "stop": ["Question:", "Context:"]
+                        }
+                    )
+                    enhanced = response.get('response', '').strip()
+                    if enhanced and len(enhanced) > len(initial_answer) * 0.8:
+                        return enhanced
+                except Exception as e:
+                    self.logger.warning(f"Ollama enhancement failed: {e}")
+            
+            # Fallback to HuggingFace pipeline
+            if self.llm_pipeline:
+                try:
+                    result = self.llm_pipeline(prompt, max_new_tokens=100, pad_token_id=50256)
+                    enhanced = result[0]['generated_text'].replace(prompt, '').strip()
+                    if enhanced and len(enhanced) > 20:
+                        return enhanced
+                except Exception as e:
+                    self.logger.warning(f"HuggingFace enhancement failed: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"LLM enhancement error: {e}")
+        
+        return None
 
 class IndustryStandardDocumentProcessor:
     """Complete industry-standard document processing pipeline"""
