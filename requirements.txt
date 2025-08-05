@@ -1,30 +1,64 @@
-# PHASE 0: CLEAN ROOM PROTOCOL - Robust PDF parsing
-# Emergency data corruption fix with validated extraction
+# PROTOCOL 3.0: GROQ + MONGODB HYPER-INTELLIGENCE
+# Memory-optimized requirements for production deployment
 
-# Core FastAPI and server
-fastapi==0.104.1
-uvicorn==0.24.0
-python-dotenv==1.0.0
-pydantic>=2.5.3,<3.0.0
+# =============================================================================
+# 🚀 CORE WEB FRAMEWORK (Essential - ~10MB total)
+# =============================================================================
+fastapi==0.104.1             # Modern async web framework (~2MB)
+uvicorn==0.24.0               # ASGI server (~1MB)
+python-dotenv==1.0.0          # Environment configuration (~100KB)
+pydantic>=2.5.3,<3.0.0       # Data validation (~3MB)
+python-multipart==0.0.20     # File upload support (~200KB)
 
-# HTTP client and file handling
-httpx>=0.26.0
-python-multipart==0.0.6
+# =============================================================================
+# 🧠 GROQ LPU HYPER-SPEED REASONING (Essential - ~5MB)
+# =============================================================================
+groq>=0.11.0                 # Latest Groq Python client (~5MB)
 
-# PROTOCOL 3.0: GROQ LPU HYPER-SPEED REASONING
-groq>=0.11.0                  # Latest Groq Python client for LPU inference (~5MB)
+# =============================================================================
+# 🗄️ MONGODB DATABASE (Memory Optimized - ~8MB total)
+# =============================================================================
+pymongo>=4.6.0               # Official MongoDB driver (~6MB)
+motor>=3.3.0                 # Async MongoDB driver (~2MB)
 
-# PHASE 0: ROBUST PDF PARSERS (priority order)
-# PyMuPDF==1.23.8              # PRIMARY - most robust PDF parser (~15MB) - DISABLED due to Windows compilation issues
-pdfplumber==0.10.3           # PRIMARY - excellent for tables (~5MB)
-PyPDF2==3.0.1               # SECONDARY - basic but reliable (~2MB)
+# =============================================================================
+# 🌐 HTTP CLIENT (Essential - ~3MB)
+# =============================================================================
+httpx>=0.26.0                # Async HTTP client (~3MB)
 
-# Minimal ML dependencies for basic functionality
-numpy==1.24.3
+# =============================================================================
+# 📄 PDF PROCESSING (Memory Optimized - ~7MB total)
+# =============================================================================
+# PyMuPDF - DISABLED due to Windows compilation issues and large size (~15MB)
+pdfplumber==0.10.3           # PRIMARY - excellent table extraction (~5MB)
+PyPDF2==3.0.1               # FALLBACK - basic but reliable (~2MB)
 
-# COMMENTED OUT - CAUSING MEMORY ISSUES ON RENDER:
-# scikit-learn==1.3.2           # ~100MB 
-# sentence-transformers==2.2.2  # ~500MB
-# transformers>=4.35.0          # ~200MB  
-# torch>=2.0.0                  # ~800MB
-# accelerate>=0.20.0            # ~50MB
+# =============================================================================
+# 🚫 HEAVY ML LIBRARIES - DISABLED FOR MEMORY OPTIMIZATION
+# =============================================================================
+# The following packages are disabled to keep memory under 100MB:
+# 
+# numpy>=1.24.0                # ~20MB - Numerical computing
+# pandas>=2.0.0                # ~30MB - Data manipulation
+# scikit-learn>=1.3.2          # ~100MB - Machine learning
+# sentence-transformers>=2.2.2 # ~500MB - Embeddings (HUGE!)
+# transformers>=4.35.0         # ~200MB - Hugging Face transformers
+# torch>=2.0.0                 # ~800MB - PyTorch (MASSIVE!)
+# accelerate>=0.20.0           # ~50MB - Model acceleration
+
+# =============================================================================
+# 📈 ESTIMATED MEMORY USAGE BREAKDOWN
+# =============================================================================
+# Core FastAPI + Uvicorn:        ~10MB
+# Groq client:                   ~5MB
+# MongoDB drivers:               ~8MB
+# HTTP client:                   ~3MB
+# PDF parsers:                   ~7MB
+# Python runtime overhead:       ~15MB
+# Application code:              ~5MB
+# Buffer for operations:         ~20MB
+# =====================================
+# TOTAL ESTIMATED:              ~73MB
+# 
+# DEPLOYMENT TARGET: <100MB (well under 512MB limit)
+# PERFORMANCE: Optimized for speed and minimal memory footprint
