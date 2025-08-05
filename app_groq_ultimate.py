@@ -159,24 +159,6 @@ KNOWN_TARGET_PATTERNS = [
     "arogya sanjeevani"
 ]
 
-class GroqIntelligenceEngine:
-    """Ultimate Groq-powered intelligence system"""
-    
-    def __init__(self):
-        self.groq_client = None
-        self.logger = logging.getLogger(__name__)
-        
-        # Initialize Groq client
-        if GROQ_AVAILABLE and GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here":
-            try:
-                self.groq_client = AsyncGroq(api_key=GROQ_API_KEY)
-                self.logger.info("🚀 GROQ CLIENT: Successfully initialized")
-            except Exception as e:
-                self.logger.error(f"❌ GROQ CLIENT: Failed to initialize - {e}")
-                self.groq_client = None
-        else:
-            self.logger.warning("⚠️ GROQ CLIENT: Not available (using local fallback)")
-
 class MongoDBManager:
     """Memory-optimized MongoDB manager for document caching"""
     
@@ -271,8 +253,124 @@ class MongoDBManager:
         if self.client:
             self.client.close()
             self.logger.info("🗄️ MONGODB: Connection closed")
+
+class GroqIntelligenceEngine:
+    """Ultimate Groq-powered intelligence system"""
+    
+    def __init__(self):
+        self.groq_client = None
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize Groq client
+        if GROQ_AVAILABLE and GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here":
+            try:
+                self.groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+                self.logger.info("🚀 GROQ CLIENT: Successfully initialized")
+            except Exception as e:
+                self.logger.error(f"❌ GROQ CLIENT: Failed to initialize - {e}")
+                self.groq_client = None
+        else:
+            self.logger.warning("⚠️ GROQ CLIENT: Not available (using local fallback)")
     
     async def analyze_document_with_intelligence(self, document_content: str, question: str) -> str:
+        """Use Groq's intelligence to analyze document and extract precise answers"""
+        
+        if not self.groq_client:
+            return await self._local_intelligent_analysis(document_content, question)
+        
+        try:
+            start_time = time.time()
+            self.logger.info(f"🧠 GROQ INTELLIGENCE: Analyzing question with surgical precision")
+            
+            # Create the ultimate analysis prompt
+            analysis_prompt = self._create_surgical_analysis_prompt(document_content, question)
+            
+            # Call Groq with maximum intelligence
+            response = await self.groq_client.chat.completions.create(
+                model=GROQ_MODEL,  # Use most powerful model
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are a surgical precision document analyst. Your task is to find the EXACT answer to questions from insurance policy documents.
+
+CRITICAL INSTRUCTIONS:
+1. Read the document with microscopic attention to detail
+2. Find the EXACT information requested - no approximations
+3. If the question asks for a number, provide the EXACT number from the document
+4. If the question asks for a percentage, provide the EXACT percentage
+5. If the question asks for a time period, provide the EXACT time period
+6. Quote directly from the document when possible
+7. Be concise but completely accurate
+8. If you cannot find the exact answer, say "Information not found in document"
+
+NEVER guess. NEVER approximate. ONLY provide information that is explicitly stated in the document."""
+                    },
+                    {
+                        "role": "user", 
+                        "content": analysis_prompt
+                    }
+                ],
+                temperature=0.0,  # Maximum precision, no creativity
+                max_tokens=200,   # Concise answers
+                top_p=0.1        # Highly focused responses
+            )
+            
+            answer = response.choices[0].message.content.strip()
+            
+            execution_time = (time.time() - start_time) * 1000
+            self.logger.info(f"⚡ GROQ ANALYSIS COMPLETE: {execution_time:.1f}ms")
+            self.logger.info(f"🎯 GROQ ANSWER: {answer}")
+            
+            return answer
+            
+        except Exception as e:
+            self.logger.error(f"❌ GROQ ANALYSIS FAILED: {e}")
+            return await self._local_intelligent_analysis(document_content, question)
+    
+    def _create_surgical_analysis_prompt(self, document_content: str, question: str) -> str:
+        """Create surgical precision analysis prompt for Groq"""
+        
+        # Truncate document if too long but keep relevant sections
+        if len(document_content) > 4000:
+            # Try to find the most relevant section
+            question_keywords = re.findall(r'\b\w{4,}\b', question.lower())
+            
+            # Split document into sections
+            sections = document_content.split('\n\n')
+            scored_sections = []
+            
+            for section in sections:
+                section_lower = section.lower()
+                score = sum(1 for keyword in question_keywords if keyword in section_lower)
+                if score > 0:
+                    scored_sections.append((section, score))
+            
+            # Sort by relevance and take top sections
+            scored_sections.sort(key=lambda x: x[1], reverse=True)
+            relevant_content = '\n\n'.join([section for section, score in scored_sections[:5]])
+            
+            if len(relevant_content) > 3000:
+                relevant_content = relevant_content[:3000] + "..."
+            
+            document_content = relevant_content
+        
+        prompt = f"""DOCUMENT TO ANALYZE:
+{document_content}
+
+QUESTION TO ANSWER WITH SURGICAL PRECISION:
+{question}
+
+TASK: Analyze the document and provide the EXACT answer to the question. Look for:
+- Specific numbers, percentages, time periods
+- Exact policy terms and conditions  
+- Precise coverage amounts and limits
+- Exact waiting periods and requirements
+
+Provide a clear, concise, and completely accurate answer based ONLY on what is explicitly stated in the document."""
+
+        return prompt
+    
+    async def _local_intelligent_analysis(self, document_content: str, question: str) -> str:
         """Use Groq's intelligence to analyze document and extract precise answers"""
         
         if not self.groq_client:
