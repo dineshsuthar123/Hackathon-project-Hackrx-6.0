@@ -52,7 +52,7 @@ echo ""
 
 # Install dependencies with memory optimization
 echo "📦 Installing memory-optimized dependencies..."
-pip install --no-cache-dir -r requirements_mongodb.txt
+pip install --no-cache-dir -r requirements.txt
 
 # Verify installations
 echo ""
