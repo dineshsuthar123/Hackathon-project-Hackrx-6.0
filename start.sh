@@ -3,4 +3,4 @@
 
 # Use the Mission 10/10 system for maximum accuracy
 #!/bin/bash
-uvicorn app_strategic:app --host 0.0.0.0 --port $PORT
+uvicorn app_hyperspeed:app --host 0.0.0.0 --port $PORT
