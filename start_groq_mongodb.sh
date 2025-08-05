@@ -184,6 +184,9 @@ print(f'   TOTAL ESTIMATED: {total_mb}MB')
 print(f'   Memory efficiency: EXCELLENT (<100MB)')
 "
 
+# Set default port if not provided by hosting platform
+export PORT=${PORT:-8000}
+
 echo ""
 echo "🚀 STARTING GROQ + MONGODB HYPER-INTELLIGENCE SERVER"
 echo "===================================================="
@@ -191,14 +194,15 @@ echo "🎯 Ready for 100% accuracy document analysis!"
 echo "⚡ 3-level caching system active"
 echo "🗄️ Persistent MongoDB document cache"
 echo "🧠 Groq LPU reasoning engine ready"
+echo "🌐 Server will start on port: $PORT"
 echo ""
 
-# Start the server with optimal settings
+# Start the server with optimal settings (no uvloop for compatibility)
 exec python -m uvicorn app_groq_ultimate:app \
     --host 0.0.0.0 \
     --port $PORT \
     --workers 1 \
-    --loop uvloop \
+    --loop asyncio \
     --http h11 \
     --log-level info \
     --access-log \
