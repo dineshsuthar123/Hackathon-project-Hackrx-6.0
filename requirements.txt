@@ -11,10 +11,13 @@ pydantic>=2.5.3,<3.0.0
 httpx>=0.26.0
 python-multipart==0.0.6
 
+# PROTOCOL 3.0: GROQ LPU HYPER-SPEED REASONING
+groq>=0.11.0                  # Latest Groq Python client for LPU inference (~5MB)
+
 # PHASE 0: ROBUST PDF PARSERS (priority order)
-PyMuPDF==1.23.8              # PRIMARY - most robust PDF parser (~15MB)
-pdfplumber==0.10.3           # SECONDARY - excellent for tables (~5MB)
-PyPDF2==3.0.1               # FALLBACK - problematic but lightweight (~2MB)
+# PyMuPDF==1.23.8              # PRIMARY - most robust PDF parser (~15MB) - DISABLED due to Windows compilation issues
+pdfplumber==0.10.3           # PRIMARY - excellent for tables (~5MB)
+PyPDF2==3.0.1               # SECONDARY - basic but reliable (~2MB)
 
 # Minimal ML dependencies for basic functionality
 numpy==1.24.3
