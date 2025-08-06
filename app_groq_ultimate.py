@@ -112,8 +112,8 @@ class HackRxResponse(BaseModel):
 
 # GROQ CONFIGURATION
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "your_groq_api_key_here")
-GROQ_MODEL = "llama-3-70b-8192"  # Use the most powerful model for maximum accuracy
-GROQ_FAST_MODEL = "llama-3-8b-8192"  # Fast model for simple tasks
+GROQ_MODEL = "llama3-70b-8192"  # Use the most powerful model for maximum accuracy
+GROQ_FAST_MODEL = "llama3-8b-8192"  # Fast model for simple tasks
 
 # MONGODB CONFIGURATION
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://dineshsld20:higTQsItjB8u95rc@cluster0.3jn8oj2.mongodb.net/")
