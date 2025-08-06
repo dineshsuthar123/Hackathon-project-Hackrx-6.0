@@ -263,6 +263,14 @@ class GroqIntelligenceEngine:
             return await self._local_intelligent_analysis(document_content, question)
         
         try:
+            # PROTOCOL 5.1: RELEVANCY CONFIRMATION FILTER
+            relevancy_check = await self._check_question_relevancy(document_content, question)
+            if not relevancy_check:
+                return "Information not found in document."
+            
+            # PROTOCOL 5.2: RESOURCE PRESERVATION GOVERNOR (2-second cooldown)
+            await asyncio.sleep(2)
+            
             start_time = time.time()
             self.logger.info(f"🧠 GROQ INTELLIGENCE: Analyzing question with surgical precision")
             
@@ -310,6 +318,47 @@ NEVER guess. NEVER approximate. ONLY provide information that is explicitly stat
         except Exception as e:
             self.logger.error(f"❌ GROQ ANALYSIS FAILED: {e}")
             return await self._local_intelligent_analysis(document_content, question)
+    
+    async def _check_question_relevancy(self, document_content: str, question: str) -> bool:
+        """PROTOCOL 5.1: Check if question can be answered from document context"""
+        
+        if not self.groq_client:
+            return True  # Skip relevancy check for local fallback
+        
+        try:
+            # Truncate document for relevancy check (faster processing)
+            context_preview = document_content[:2000] + "..." if len(document_content) > 2000 else document_content
+            
+            relevancy_response = await self.groq_client.chat.completions.create(
+                model=GROQ_FAST_MODEL,  # Use fast model for relevancy check
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are a relevancy checker. Based ONLY on the provided context, is it possible to answer the user's question? Respond with only the single word "Yes" or "No"."""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""CONTEXT: {context_preview}
+
+QUESTION: {question}
+
+ANSWER:"""
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=5,  # Single word response
+                top_p=0.1
+            )
+            
+            relevancy_result = relevancy_response.choices[0].message.content.strip().lower()
+            is_relevant = relevancy_result == "yes"
+            
+            self.logger.info(f"🔍 RELEVANCY CHECK: {'✅ RELEVANT' if is_relevant else '❌ NOT RELEVANT'}")
+            return is_relevant
+            
+        except Exception as e:
+            self.logger.error(f"❌ RELEVANCY CHECK FAILED: {e}")
+            return True  # Default to True if check fails
     
     def _create_surgical_analysis_prompt(self, document_content: str, question: str) -> str:
         """Create surgical precision analysis prompt for Groq"""
@@ -515,6 +564,8 @@ class GroqDocumentProcessor:
             "cache_hits": 0,
             "mongodb_hits": 0,
             "groq_calls": 0,
+            "relevancy_checks": 0,
+            "irrelevant_questions": 0,
             "total_questions": 0,
             "total_time_ms": 0
         }
@@ -619,7 +670,7 @@ class GroqDocumentProcessor:
         return answer
     
     async def _process_single_question_optimized(self, document_url: str, question: str, document_content: str) -> str:
-        """LIGHTWEIGHT: Process single question with pre-loaded document content"""
+        """LIGHTWEIGHT: Process single question with pre-loaded document content + STRATEGIC PROTOCOLS"""
         start_time = time.time()
         self.stats["total_questions"] += 1
         
@@ -636,8 +687,18 @@ class GroqDocumentProcessor:
         # LEVEL 2: MONGODB CACHE CHECK (skip for speed in production)
         # Skip MongoDB check for maximum speed in production
         
-        # LEVEL 3: GROQ INTELLIGENCE ANALYSIS (with pre-loaded content)
+        # LEVEL 3: STRATEGIC GROQ INTELLIGENCE ANALYSIS (with PROTOCOLS 5.1 & 5.2)
         self.stats["groq_calls"] += 1
+        
+        # PROTOCOL 5.1: RELEVANCY CONFIRMATION FILTER
+        if self.groq_engine.groq_client:
+            relevancy_check = await self.groq_engine._check_question_relevancy(document_content, question)
+            if not relevancy_check:
+                execution_time = (time.time() - start_time) * 1000
+                self.stats["total_time_ms"] += execution_time
+                self.logger.info(f"❌ IRRELEVANT QUESTION: {execution_time:.1f}ms")
+                return "Information not found in document."
+        
         answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question)
         
         execution_time = (time.time() - start_time) * 1000
@@ -772,8 +833,11 @@ async def process_document_questions(
         logger.info(f"   ⚡ Static cache hits: {groq_processor.stats['cache_hits']}")
         logger.info(f"   🗄️ MongoDB hits: {groq_processor.stats['mongodb_hits']}")
         logger.info(f"   🧠 Groq calls: {groq_processor.stats['groq_calls']}")
+        logger.info(f"   🔍 Relevancy checks: {groq_processor.stats.get('relevancy_checks', 0)}")
+        logger.info(f"   ❌ Irrelevant questions: {groq_processor.stats.get('irrelevant_questions', 0)}")
         logger.info(f"   ⏱️ Total time: {total_time:.1f}ms")
         logger.info(f"   🎯 Questions processed: {groq_processor.stats['total_questions']}")
+        logger.info("   🚀 STRATEGIC PROTOCOLS 5.1 & 5.2: ACTIVE")
         
         return HackRxResponse(answers=answers)
         
