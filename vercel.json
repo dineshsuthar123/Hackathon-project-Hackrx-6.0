@@ -1,0 +1,31 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "api/index.py",
+            "use": "@vercel/python"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/(.*)",
+            "dest": "api/index.py"
+        }
+    ],
+    "env": {
+        "GROQ_API_KEY": "@groq_api_key",
+        "MONGODB_URI": "@mongodb_uri",
+        "HACKRX_API_TOKEN": "@hackrx_api_token",
+        "MONGODB_DATABASE": "@mongodb_database",
+        "MONGODB_COLLECTION": "@mongodb_collection"
+    },
+    "functions": {
+        "api/index.py": {
+            "maxDuration": 30,
+            "runtime": "python3.9"
+        }
+    },
+    "regions": [
+        "iad1"
+    ]
+}
