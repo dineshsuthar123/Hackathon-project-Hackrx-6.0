@@ -1,8 +1,9 @@
-# PROTOCOL 3.0: GROQ + MONGODB HYPER-INTELLIGENCE
-# Memory-optimized requirements for production deployment
+# PROTOCOL 6.0: LIGHTWEIGHT PRODUCTION REQUIREMENTS
+# Memory-optimized for 512MB RAM limit
+# NO HEAVY ML LIBRARIES - PRODUCTION ONLY
 
 # =============================================================================
-# 🚀 CORE WEB FRAMEWORK (Essential - ~10MB total)
+# 🚀 CORE WEB FRAMEWORK (Essential - ~8MB total)
 # =============================================================================
 fastapi==0.104.1             # Modern async web framework (~2MB)
 uvicorn==0.24.0               # ASGI server (~1MB)
@@ -27,38 +28,41 @@ motor>=3.3.0                 # Async MongoDB driver (~2MB)
 httpx>=0.26.0                # Async HTTP client (~3MB)
 
 # =============================================================================
-# 📄 PDF PROCESSING (Memory Optimized - ~7MB total)
+# 📄 PDF PROCESSING (Ultra-Lightweight - ~3MB total)
 # =============================================================================
-# PyMuPDF - DISABLED due to Windows compilation issues and large size (~15MB)
-pdfplumber==0.10.3           # PRIMARY - excellent table extraction (~5MB)
-PyPDF2==3.0.1               # FALLBACK - basic but reliable (~2MB)
+PyPDF2==3.0.1               # Primary lightweight PDF parsing (~2MB)
+pdfplumber==0.10.3           # Secondary extraction (~1MB)
+# PyMuPDF (fitz) REMOVED - Too heavy for production (~15MB)
 
 # =============================================================================
-# 🚫 HEAVY ML LIBRARIES - DISABLED FOR MEMORY OPTIMIZATION
+# 📊 MINIMAL COMPUTATION (Essential - ~5MB)
 # =============================================================================
-# The following packages are disabled to keep memory under 100MB:
-# 
-# numpy>=1.24.0                # ~20MB - Numerical computing
-# pandas>=2.0.0                # ~30MB - Data manipulation
-# scikit-learn>=1.3.2          # ~100MB - Machine learning
-# sentence-transformers>=2.2.2 # ~500MB - Embeddings (HUGE!)
-# transformers>=4.35.0         # ~200MB - Hugging Face transformers
-# torch>=2.0.0                 # ~800MB - PyTorch (MASSIVE!)
-# accelerate>=0.20.0           # ~50MB - Model acceleration
+numpy>=1.24.0,<2.0.0        # Essential numerical operations (~5MB)
 
 # =============================================================================
-# 📈 ESTIMATED MEMORY USAGE BREAKDOWN
+# 🚫 FORBIDDEN LIBRARIES - DO NOT INCLUDE IN PRODUCTION
 # =============================================================================
-# Core FastAPI + Uvicorn:        ~10MB
+# torch                      # ~800MB - FORBIDDEN
+# transformers               # ~200MB - FORBIDDEN  
+# sentence-transformers      # ~500MB - FORBIDDEN
+# scikit-learn              # ~100MB - FORBIDDEN
+# torchvision               # ~300MB - FORBIDDEN
+# tensorflow                # ~400MB - FORBIDDEN
+
+# =============================================================================
+# 📈 ESTIMATED PRODUCTION MEMORY USAGE
+# =============================================================================
+# Core FastAPI + Uvicorn:        ~8MB
 # Groq client:                   ~5MB
 # MongoDB drivers:               ~8MB
 # HTTP client:                   ~3MB
-# PDF parsers:                   ~7MB
+# PDF parsers:                   ~3MB
+# NumPy:                         ~5MB
 # Python runtime overhead:       ~15MB
 # Application code:              ~5MB
 # Buffer for operations:         ~20MB
 # =====================================
-# TOTAL ESTIMATED:              ~73MB
+# TOTAL ESTIMATED:              ~72MB
 # 
-# DEPLOYMENT TARGET: <100MB (well under 512MB limit)
-# PERFORMANCE: Optimized for speed and minimal memory footprint
+# TARGET: <100MB (7x under 512MB limit)
+# SAFETY MARGIN: 440MB available for scaling

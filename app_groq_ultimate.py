@@ -1,6 +1,6 @@
 """
-PROTOCOL 3.0: GROQ HYPER-INTELLIGENCE SYSTEM
-Ultimate document analysis with 100% accuracy guarantee
+PROTOCOL 7.0: GROQ REACT HYPER-INTELLIGENCE SYSTEM
+Ultimate document analysis with ReAct multi-step reasoning
 Groq LPU + Advanced ReAct + Precision Document Analysis
 """
 
@@ -21,6 +21,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+
+# ReAct Framework Integration - PROTOCOL 7.0
+try:
+    from react_reasoning import ReActReasoningEngine
+    REACT_AVAILABLE = True
+except ImportError:
+    REACT_AVAILABLE = False
+    ReActReasoningEngine = None
 
 # Groq Integration
 try:
@@ -78,9 +86,9 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Groq Hyper-Intelligence API - Protocol 3.0",
-    description="Ultimate Document Analysis with Groq LPU + ReAct Framework",
-    version="3.0.0"
+    title="Groq ReAct Intelligence API - Protocol 7.0",
+    description="Ultimate Document Analysis with Groq LPU + Multi-Step ReAct Reasoning",
+    version="7.0.0"
 )
 
 # CORS middleware
@@ -255,10 +263,11 @@ class MongoDBManager:
             self.logger.info("🗄️ MONGODB: Connection closed")
 
 class GroqIntelligenceEngine:
-    """Ultimate Groq-powered intelligence system"""
+    """PROTOCOL 7.0: Ultimate Groq-powered ReAct intelligence system"""
     
     def __init__(self):
         self.groq_client = None
+        self.react_engine = None
         self.logger = logging.getLogger(__name__)
         
         # Initialize Groq client
@@ -266,6 +275,14 @@ class GroqIntelligenceEngine:
             try:
                 self.groq_client = AsyncGroq(api_key=GROQ_API_KEY)
                 self.logger.info("🚀 GROQ CLIENT: Successfully initialized")
+                
+                # Initialize ReAct reasoning engine
+                if REACT_AVAILABLE:
+                    self.react_engine = ReActReasoningEngine(self.groq_client, self.logger)
+                    self.logger.info("🧠 REACT ENGINE: Multi-step reasoning activated")
+                else:
+                    self.logger.warning("⚠️ REACT ENGINE: Not available")
+                    
             except Exception as e:
                 self.logger.error(f"❌ GROQ CLIENT: Failed to initialize - {e}")
                 self.groq_client = None
@@ -273,10 +290,63 @@ class GroqIntelligenceEngine:
             self.logger.warning("⚠️ GROQ CLIENT: Not available (using local fallback)")
     
     async def analyze_document_with_intelligence(self, document_content: str, question: str) -> str:
-        """Use Groq's intelligence to analyze document and extract precise answers"""
+        """PROTOCOL 7.0: ReAct multi-step reasoning analysis"""
         
         if not self.groq_client:
             return await self._local_intelligent_analysis(document_content, question)
+        
+        # PROTOCOL 7.0: Detect complex queries requiring ReAct reasoning
+        is_complex_query = self._detect_complex_query(question)
+        
+        if is_complex_query and self.react_engine:
+            self.logger.info("🧠 COMPLEX QUERY DETECTED: Engaging ReAct reasoning")
+            try:
+                return await self.react_engine.reason_and_act(document_content, question)
+            except Exception as e:
+                self.logger.error(f"❌ REACT REASONING FAILED: {e}, falling back to linear analysis")
+                # Fall through to linear analysis
+        
+        # Linear analysis for simple queries
+        return await self._linear_analysis(document_content, question)
+    
+    def _detect_complex_query(self, question: str) -> bool:
+        """Detect if query requires multi-step reasoning"""
+        
+        complexity_indicators = [
+            # Multi-part queries
+            'and', 'also', 'additionally', 'furthermore', 'moreover',
+            # Conditional logic
+            'while', 'if', 'when', 'given that', 'considering',
+            # Sequential processes
+            'process for', 'steps to', 'how to', 'procedure',
+            # Multiple entities
+            'both', 'either', 'all of', 'each of',
+            # Comparison queries
+            'difference between', 'compare', 'versus',
+            # Scenario-based
+            'scenario', 'case where', 'situation',
+            # Multi-step indicators
+            'first', 'second', 'then', 'next', 'finally'
+        ]
+        
+        question_lower = question.lower()
+        complexity_score = sum(1 for indicator in complexity_indicators if indicator in question_lower)
+        
+        # Length-based complexity
+        if len(question.split()) > 15:
+            complexity_score += 1
+        
+        # Punctuation complexity (multiple clauses)
+        if question.count(',') > 1 or question.count(';') > 0:
+            complexity_score += 1
+        
+        is_complex = complexity_score >= 2
+        
+        self.logger.info(f"🔍 COMPLEXITY ANALYSIS: Score={complexity_score}, Complex={is_complex}")
+        return is_complex
+    
+    async def _linear_analysis(self, document_content: str, question: str) -> str:
+        """Linear analysis for simple queries (original method)"""
         
         try:
             # PROTOCOL 5.1: RELEVANCY CONFIRMATION FILTER
@@ -592,7 +662,7 @@ class GroqDocumentProcessor:
         self.mongodb_manager = MongoDBManager()
         self.logger = logging.getLogger(__name__)
         
-        # Performance tracking
+        # Performance tracking - PROTOCOL 7.0
         self.stats = {
             "cache_hits": 0,
             "mongodb_hits": 0,
@@ -601,7 +671,11 @@ class GroqDocumentProcessor:
             "irrelevant_questions": 0,
             "potential_false_negatives": 0,
             "total_questions": 0,
-            "total_time_ms": 0
+            "total_time_ms": 0,
+            "complex_queries": 0,
+            "react_reasoning_calls": 0,
+            "linear_analysis_calls": 0,
+            "reasoning_steps_total": 0
         }
     
     def _is_known_target(self, document_url: str) -> bool:
@@ -704,7 +778,7 @@ class GroqDocumentProcessor:
         return answer
     
     async def _process_single_question_optimized(self, document_url: str, question: str, document_content: str) -> str:
-        """LIGHTWEIGHT: Process single question with pre-loaded document content + STRATEGIC PROTOCOLS"""
+        """PROTOCOL 7.0: Process single question with ReAct reasoning + STRATEGIC PROTOCOLS"""
         start_time = time.time()
         self.stats["total_questions"] += 1
         
@@ -721,28 +795,27 @@ class GroqDocumentProcessor:
         # LEVEL 2: MONGODB CACHE CHECK (skip for speed in production)
         # Skip MongoDB check for maximum speed in production
         
-        # LEVEL 3: STRATEGIC GROQ INTELLIGENCE ANALYSIS (with PROTOCOLS 5.1 & 5.2)
+        # LEVEL 3: PROTOCOL 7.0 ReAct INTELLIGENCE ANALYSIS
         self.stats["groq_calls"] += 1
         
-        # PROTOCOL 5.1: RELEVANCY CONFIRMATION FILTER - FINAL CALIBRATION
-        if self.groq_engine.groq_client:
-            self.stats["relevancy_checks"] += 1
-            relevancy_check = await self.groq_engine._check_question_relevancy(document_content, question)
-            if not relevancy_check:
-                self.stats["irrelevant_questions"] += 1
-                self.stats["potential_false_negatives"] += 1
-                execution_time = (time.time() - start_time) * 1000
-                self.stats["total_time_ms"] += execution_time
-                self.logger.info(f"❌ IRRELEVANT QUESTION (POTENTIAL FALSE NEGATIVE): {execution_time:.1f}ms")
-                return "Information not found in document."
+        # Detect query complexity
+        is_complex = self.groq_engine._detect_complex_query(question)
+        if is_complex:
+            self.stats["complex_queries"] += 1
+            self.stats["react_reasoning_calls"] += 1
+        else:
+            self.stats["linear_analysis_calls"] += 1
         
         answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question)
         
         execution_time = (time.time() - start_time) * 1000
         self.stats["total_time_ms"] += execution_time
         
-        self.logger.info(f"🎯 GROQ INTELLIGENCE COMPLETE: {execution_time:.1f}ms")
+        reasoning_type = "ReAct" if is_complex else "Linear"
+        self.logger.info(f"🎯 {reasoning_type} ANALYSIS COMPLETE: {execution_time:.1f}ms")
         self.logger.info(f"✅ FINAL ANSWER: {answer}")
+        
+        return answer
         
         return answer
     
@@ -783,30 +856,30 @@ class GroqDocumentProcessor:
         
         extracted_text = ""
         
-        # METHOD 1: PyMuPDF (Most reliable for complex PDFs)
-        if FITZ_AVAILABLE and fitz:
+        # PROTOCOL 6.1: LIGHTWEIGHT PRODUCTION ORDER
+        # METHOD 1: PyPDF2 (Lightest - Priority for production)
+        if PYPDF2_AVAILABLE and PyPDF2:
             try:
-                self.logger.info("🔄 EXTRACTING with PyMuPDF...")
-                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                self.logger.info("🔄 EXTRACTING with PyPDF2 (Production Priority)...")
                 text_parts = []
                 
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    page_text = page.get_text()
+                pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_bytes))
+                for page_num in range(len(pdf_reader.pages)):
+                    page = pdf_reader.pages[page_num]
+                    page_text = page.extract_text()
                     if page_text.strip():
                         text_parts.append(page_text)
                 
-                doc.close()
                 extracted_text = "\n\n".join(text_parts)
                 
                 if len(extracted_text) > 1000:  # Successful extraction
-                    self.logger.info(f"✅ PyMuPDF SUCCESS: {len(extracted_text)} characters extracted")
+                    self.logger.info(f"✅ PyPDF2 SUCCESS: {len(extracted_text)} characters extracted")
                     return self._sanitize_text(extracted_text)
                     
             except Exception as e:
-                self.logger.error(f"❌ PyMuPDF failed: {e}")
+                self.logger.error(f"❌ PyPDF2 failed: {e}")
         
-        # METHOD 2: pdfplumber (Good for structured content)
+        # METHOD 2: pdfplumber (Secondary - Good for structured content)
         if PDFPLUMBER_AVAILABLE and pdfplumber and not extracted_text:
             try:
                 self.logger.info("🔄 EXTRACTING with pdfplumber...")
@@ -827,27 +900,31 @@ class GroqDocumentProcessor:
             except Exception as e:
                 self.logger.error(f"❌ pdfplumber failed: {e}")
         
-        # METHOD 3: PyPDF2 (Fallback for simple PDFs)
-        if PYPDF2_AVAILABLE and PyPDF2 and not extracted_text:
+        # METHOD 3: PyMuPDF (Fallback - Heavy but reliable)
+        if FITZ_AVAILABLE and fitz and not extracted_text:
             try:
-                self.logger.info("🔄 EXTRACTING with PyPDF2...")
+                self.logger.info("🔄 EXTRACTING with PyMuPDF (Fallback)...")
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                 text_parts = []
                 
-                pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_bytes))
-                for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
-                    page_text = page.extract_text()
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    page_text = page.get_text()
                     if page_text.strip():
                         text_parts.append(page_text)
                 
+                doc.close()
                 extracted_text = "\n\n".join(text_parts)
                 
                 if len(extracted_text) > 1000:  # Successful extraction
-                    self.logger.info(f"✅ PyPDF2 SUCCESS: {len(extracted_text)} characters extracted")
+                    self.logger.info(f"✅ PyMuPDF SUCCESS: {len(extracted_text)} characters extracted")
                     return self._sanitize_text(extracted_text)
                     
             except Exception as e:
-                self.logger.error(f"❌ PyPDF2 failed: {e}")
+                self.logger.error(f"❌ PyMuPDF failed: {e}")
+        
+        # METHOD 3: PyPDF2 (Backup - Already processed above)
+        # Skipping duplicate PyPDF2 processing
         
         # FINAL FALLBACK: If all methods fail
         if not extracted_text or len(extracted_text) < 500:
@@ -1003,18 +1080,18 @@ async def process_document_questions(
         
         total_time = (time.time() - start_time) * 1000
         
-        # Performance summary
+        # Performance summary - PROTOCOL 7.0
         logger.info(f"\n{'='*60}")
-        logger.info("📊 GROQ INTELLIGENCE SESSION COMPLETE")
+        logger.info("📊 GROQ REACT INTELLIGENCE SESSION COMPLETE")
         logger.info(f"   ⚡ Static cache hits: {groq_processor.stats['cache_hits']}")
         logger.info(f"   🗄️ MongoDB hits: {groq_processor.stats['mongodb_hits']}")
         logger.info(f"   🧠 Groq calls: {groq_processor.stats['groq_calls']}")
-        logger.info(f"   🔍 Relevancy checks: {groq_processor.stats.get('relevancy_checks', 0)}")
-        logger.info(f"   ❌ Irrelevant questions: {groq_processor.stats.get('irrelevant_questions', 0)}")
-        logger.info(f"   ⚠️ Potential false negatives: {groq_processor.stats.get('potential_false_negatives', 0)}")
+        logger.info(f"   🔍 Complex queries: {groq_processor.stats['complex_queries']}")
+        logger.info(f"   🎯 ReAct reasoning calls: {groq_processor.stats['react_reasoning_calls']}")
+        logger.info(f"   📈 Linear analysis calls: {groq_processor.stats['linear_analysis_calls']}")
         logger.info(f"   ⏱️ Total time: {total_time:.1f}ms")
         logger.info(f"   🎯 Questions processed: {groq_processor.stats['total_questions']}")
-        logger.info("   🚀 STRATEGIC PROTOCOLS 5.1 & 5.2: FINAL CALIBRATION ACTIVE")
+        logger.info("   🚀 PROTOCOL 7.0: REACT MULTI-STEP REASONING ACTIVE")
         
         return HackRxResponse(answers=answers)
         
@@ -1026,18 +1103,24 @@ async def process_document_questions(
 async def root():
     """Health check endpoint"""
     return {
-        "status": "Groq Hyper-Intelligence Active",
-        "engine": "Groq LPU" if groq_processor.groq_engine.groq_client else "Local Fallback",
+        "status": "Groq ReAct Intelligence Active - Protocol 7.0",
+        "engine": "Groq LPU + ReAct" if groq_processor.groq_engine.groq_client else "Local Fallback",
+        "react_engine": "Active" if groq_processor.groq_engine.react_engine else "Unavailable",
         "model": GROQ_MODEL,
         "cache_size": len(STATIC_ANSWER_CACHE),
         "performance": {
             "cache_hits": groq_processor.stats["cache_hits"],
             "mongodb_hits": groq_processor.stats["mongodb_hits"],
             "groq_calls": groq_processor.stats["groq_calls"],
+            "complex_queries": groq_processor.stats["complex_queries"],
+            "react_reasoning_calls": groq_processor.stats["react_reasoning_calls"],
+            "linear_analysis_calls": groq_processor.stats["linear_analysis_calls"],
             "total_questions": groq_processor.stats["total_questions"],
             "avg_response_time_ms": groq_processor.stats["total_time_ms"] / max(1, groq_processor.stats["total_questions"])
         },
         "capabilities": [
+            "Multi-step ReAct reasoning",
+            "Complex query decomposition", 
             "Surgical precision document analysis",
             "Hyper-speed static cache",
             "Advanced fuzzy matching",
@@ -1051,9 +1134,10 @@ async def health_check():
     """Detailed health check"""
     return {
         "status": "healthy",
-        "protocol": "3.0 - Groq Hyper-Intelligence",
+        "protocol": "7.0 - Groq ReAct Multi-Step Reasoning",
         "groq_status": {
             "client_available": groq_processor.groq_engine.groq_client is not None,
+            "react_engine_available": groq_processor.groq_engine.react_engine is not None,
             "model": GROQ_MODEL,
             "api_configured": GROQ_API_KEY != "your_groq_api_key_here"
         },
