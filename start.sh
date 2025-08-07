@@ -1,7 +1,8 @@
 #!/bin/bash
 # Render startup script for Groq ReAct Intelligence API
 
-echo "🚀 Starting Groq ReAct Intelligence API - Protocol 7.0"
+echo "🚀 Starting Groq ReAct Intelligence API - Protocol 7.1/7.2"
+echo "🛡️ Contextual Guardrail + Generalized RAG Active"
 echo "================================================="
 
 # Set default port if not provided

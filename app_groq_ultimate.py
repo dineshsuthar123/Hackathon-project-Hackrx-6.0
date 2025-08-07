@@ -289,7 +289,7 @@ class GroqIntelligenceEngine:
         else:
             self.logger.warning("⚠️ GROQ CLIENT: Not available (using local fallback)")
     
-    async def analyze_document_with_intelligence(self, document_content: str, question: str, document_url: str = "") -> str:
+    async def analyze_document_with_intelligence(self, document_content: str, question: str, document_url: str = "", processor=None) -> str:
         """
         PROTOCOL 7.2: GENERALIZED RAG PROTOCOL for Unknown Targets
         
@@ -302,10 +302,12 @@ class GroqIntelligenceEngine:
         if not self.groq_client:
             return await self._local_intelligent_analysis(document_content, question)
         
-        # PROTOCOL 7.1: Contextual Guardrail Check
-        is_known_document = self._is_known_target(document_url) if document_url else False
+        # PROTOCOL 7.1: Contextual Guardrail Check (delegate to processor)
+        is_known_document = False
+        if document_url and processor:
+            is_known_document = processor._is_known_target(document_url)
         
-        if not is_known_document:
+        if not is_known_document and document_url:
             self.logger.info("🚨 UNKNOWN TARGET PROTOCOL ACTIVATED")
             self.logger.info("📚 Engaging GENERALIZED RAG for new document comprehension")
             
@@ -948,7 +950,7 @@ class GroqDocumentProcessor:
         document_content = await self._get_clean_document_content(document_url)
         
         self.stats["groq_calls"] += 1
-        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question, document_url)
+        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question, document_url, self)
         
         # Cache the result in MongoDB for future use
         qa_pair = {"question": question, "answer": answer, "timestamp": time.time()}
@@ -991,7 +993,7 @@ class GroqDocumentProcessor:
         else:
             self.stats["linear_analysis_calls"] += 1
         
-        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question, document_url)
+        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question, document_url, self)
         
         execution_time = (time.time() - start_time) * 1000
         self.stats["total_time_ms"] += execution_time
@@ -1244,30 +1246,64 @@ async def process_document_questions(
     request: HackRxRequest,
     token: str = Depends(verify_token)
 ) -> HackRxResponse:
-    """LIGHTWEIGHT PRODUCTION: Process documents with optimized Groq Intelligence"""
+    """PROTOCOL 7.1/7.2: Process documents with overfitting prevention + generalized RAG"""
     try:
         start_time = time.time()
-        logger.info(f"⚡ LIGHTWEIGHT MODE: Processing {len(request.questions)} questions")
+        logger.info(f"🚀 PROTOCOL 7.1/7.2: Processing {len(request.questions)} questions")
+        logger.info(f"📄 Document URL: {request.documents}")
+        
+        # PROTOCOL 7.1: Check if document is known or unknown target
+        is_known = groq_processor._is_known_target(request.documents)
+        if is_known:
+            logger.info("🎯 KNOWN DOCUMENT: Arogya Sanjeevani - Static cache authorized")
+        else:
+            logger.info("⚠️ UNKNOWN DOCUMENT: Engaging Protocol 7.2 Generalized RAG")
         
         # PERFORMANCE OPTIMIZATION: Pre-load document content ONCE
-        document_content = await groq_processor._get_clean_document_content(request.documents)
-        
-        answers = []
-        for i, question in enumerate(request.questions, 1):
-            logger.info(f"🎯 QUESTION {i}/{len(request.questions)}")
-            logger.info(f"❓ Question: {question}")
+        logger.info("📥 Loading document content...")
+        try:
+            document_content = await groq_processor._get_clean_document_content(request.documents)
+            logger.info(f"✅ Document loaded: {len(document_content)} characters")
             
-            # Use pre-loaded document content for speed
-            answer = await groq_processor._process_single_question_optimized(
-                request.documents, question, document_content
-            )
-            answers.append(answer)
+            if len(document_content) < 100:
+                logger.error("❌ CRITICAL: Document content too short, possible download failure")
+                raise HTTPException(status_code=400, detail="Document could not be properly loaded")
+                
+        except Exception as e:
+            logger.error(f"❌ Document loading failed: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to load document: {str(e)}")
+        
+        # Process questions with batching for memory management
+        answers = []
+        batch_size = 5  # Process in smaller batches to prevent timeouts
+        
+        for batch_start in range(0, len(request.questions), batch_size):
+            batch_end = min(batch_start + batch_size, len(request.questions))
+            batch_questions = request.questions[batch_start:batch_end]
+            
+            logger.info(f"🔄 Processing batch {batch_start//batch_size + 1}: questions {batch_start+1}-{batch_end}")
+            
+            for i, question in enumerate(batch_questions, batch_start + 1):
+                logger.info(f"🎯 QUESTION {i}/{len(request.questions)}: {question[:100]}...")
+                
+                try:
+                    # Use pre-loaded document content for speed
+                    answer = await groq_processor._process_single_question_optimized(
+                        request.documents, question, document_content
+                    )
+                    answers.append(answer)
+                    logger.info(f"✅ Question {i} completed")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Question {i} failed: {e}")
+                    answers.append(f"Error processing question: {str(e)}")
         
         total_time = (time.time() - start_time) * 1000
         
-        # Performance summary - PROTOCOL 7.0
+        # Performance summary - PROTOCOL 7.1/7.2
         logger.info(f"\n{'='*60}")
-        logger.info("📊 GROQ REACT INTELLIGENCE SESSION COMPLETE")
+        logger.info("📊 GROQ INTELLIGENCE SESSION COMPLETE - PROTOCOL 7.1/7.2")
+        logger.info(f"   📄 Document type: {'KNOWN (Arogya)' if is_known else 'UNKNOWN (Generalized RAG)'}")
         logger.info(f"   ⚡ Static cache hits: {groq_processor.stats['cache_hits']}")
         logger.info(f"   🗄️ MongoDB hits: {groq_processor.stats['mongodb_hits']}")
         logger.info(f"   🧠 Groq calls: {groq_processor.stats['groq_calls']}")
@@ -1276,13 +1312,72 @@ async def process_document_questions(
         logger.info(f"   📈 Linear analysis calls: {groq_processor.stats['linear_analysis_calls']}")
         logger.info(f"   ⏱️ Total time: {total_time:.1f}ms")
         logger.info(f"   🎯 Questions processed: {groq_processor.stats['total_questions']}")
-        logger.info("   🚀 PROTOCOL 7.0: REACT MULTI-STEP REASONING ACTIVE")
+        logger.info("   �️ PROTOCOL 7.1: CONTEXTUAL GUARDRAIL ACTIVE")
+        logger.info("   📚 PROTOCOL 7.2: GENERALIZED RAG ACTIVE")
         
         return HackRxResponse(answers=answers)
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Groq processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+
+@app.get("/debug/document")
+async def debug_document_processing(
+    url: str,
+    question: str = "What is the name of the insurance company?",
+    token: str = Depends(verify_token)
+):
+    """Debug endpoint for testing document processing"""
+    try:
+        logger.info(f"🧪 DEBUG: Testing document processing")
+        logger.info(f"📄 URL: {url}")
+        logger.info(f"❓ Question: {question}")
+        
+        # Step 1: Document type detection
+        is_known = groq_processor._is_known_target(url)
+        logger.info(f"🔍 Document type: {'KNOWN' if is_known else 'UNKNOWN'}")
+        
+        # Step 2: Document loading
+        start_time = time.time()
+        document_content = await groq_processor._get_clean_document_content(url)
+        load_time = (time.time() - start_time) * 1000
+        
+        logger.info(f"📥 Document loaded: {len(document_content)} chars in {load_time:.1f}ms")
+        
+        if len(document_content) < 100:
+            return {
+                "error": "Document content too short",
+                "content_length": len(document_content),
+                "status": "failed"
+            }
+        
+        # Step 3: Single question processing
+        start_time = time.time()
+        answer = await groq_processor._process_single_question_optimized(
+            url, question, document_content
+        )
+        process_time = (time.time() - start_time) * 1000
+        
+        return {
+            "status": "success",
+            "document_type": "known" if is_known else "unknown",
+            "content_length": len(document_content),
+            "load_time_ms": load_time,
+            "process_time_ms": process_time,
+            "question": question,
+            "answer": answer,
+            "protocol": "7.1/7.2 Active"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Debug processing failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "protocol": "7.1/7.2 Debug"
+        }
 
 @app.get("/")
 async def root():
