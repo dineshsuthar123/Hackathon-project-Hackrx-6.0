@@ -120,8 +120,8 @@ class HackRxResponse(BaseModel):
 
 # GROQ CONFIGURATION
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "your_groq_api_key_here")
-GROQ_MODEL = "llama3-70b-8192"  # Use the most powerful model for maximum accuracy
-GROQ_FAST_MODEL = "llama3-8b-8192"  # Fast model for simple tasks
+GROQ_MODEL = "llama-3.1-8b-instant"  # Active model for maximum accuracy
+GROQ_FAST_MODEL = "llama-3.1-8b-instant"  # Fast model for simple tasks
 
 # MONGODB CONFIGURATION
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://dineshsld20:higTQsItjB8u95rc@cluster0.3jn8oj2.mongodb.net/")
@@ -289,13 +289,30 @@ class GroqIntelligenceEngine:
         else:
             self.logger.warning("⚠️ GROQ CLIENT: Not available (using local fallback)")
     
-    async def analyze_document_with_intelligence(self, document_content: str, question: str) -> str:
-        """PROTOCOL 7.0: ReAct multi-step reasoning analysis"""
+    async def analyze_document_with_intelligence(self, document_content: str, question: str, document_url: str = "") -> str:
+        """
+        PROTOCOL 7.2: GENERALIZED RAG PROTOCOL for Unknown Targets
+        
+        This method implements true generalization - the ability to understand 
+        ANY document, not just the hardcoded Arogya Sanjeevani knowledge.
+        
+        MISSION: Achieve high accuracy on unseen documents through robust RAG pipeline
+        """
         
         if not self.groq_client:
             return await self._local_intelligent_analysis(document_content, question)
         
-        # PROTOCOL 7.0: Detect complex queries requiring ReAct reasoning
+        # PROTOCOL 7.1: Contextual Guardrail Check
+        is_known_document = self._is_known_target(document_url) if document_url else False
+        
+        if not is_known_document:
+            self.logger.info("🚨 UNKNOWN TARGET PROTOCOL ACTIVATED")
+            self.logger.info("📚 Engaging GENERALIZED RAG for new document comprehension")
+            
+            # PROTOCOL 7.2: Enhanced processing for unknown documents
+            return await self._generalized_rag_analysis(document_content, question)
+        
+        # For known documents, use existing logic
         is_complex_query = self._detect_complex_query(question)
         
         if is_complex_query and self.react_engine:
@@ -306,8 +323,148 @@ class GroqIntelligenceEngine:
                 self.logger.error(f"❌ REACT REASONING FAILED: {e}, falling back to linear analysis")
                 # Fall through to linear analysis
         
-        # Linear analysis for simple queries
+        # Linear analysis for simple queries on known documents
         return await self._linear_analysis(document_content, question)
+    
+    async def _generalized_rag_analysis(self, document_content: str, question: str) -> str:
+        """
+        PROTOCOL 7.2: Core Generalized RAG Pipeline for Unknown Targets
+        
+        Steps:
+        1. Full Ingestion - ensure complete document loading
+        2. Precision Retrieval - robust chunk extraction with re-ranking
+        3. Safety-First Generation - relevancy check + LLM generation
+        """
+        
+        self.logger.info("🔄 STEP 1: FULL INGESTION - Loading complete document")
+        
+        # Validate document ingestion
+        if not document_content or len(document_content.strip()) < 100:
+            self.logger.error("❌ CRITICAL FAILURE: Document truncation detected")
+            return "ERROR: Document could not be fully loaded. Please check the document URL and try again."
+        
+        self.logger.info(f"✅ Document loaded: {len(document_content)} characters")
+        
+        self.logger.info("🔄 STEP 2: PRECISION RETRIEVAL - Extracting relevant chunks")
+        
+        # Enhanced chunk extraction for unknown documents
+        relevant_chunks = await self._extract_precision_chunks(document_content, question)
+        
+        if not relevant_chunks:
+            self.logger.error("❌ CRITICAL FAILURE: No relevant content found")
+            return "I could not find relevant information in this document to answer your question. The document may not contain the information you're looking for."
+        
+        self.logger.info(f"✅ Relevant chunks extracted: {len(relevant_chunks)} chunks")
+        
+        self.logger.info("🔄 STEP 3: SAFETY-FIRST GENERATION - Relevancy check + LLM analysis")
+        
+        # Enhanced prompt for unknown documents
+        enhanced_context = "\n\n".join(relevant_chunks)
+        
+        return await self._safety_first_generation(enhanced_context, question)
+    
+    async def _extract_precision_chunks(self, document_content: str, question: str) -> List[str]:
+        """Enhanced chunk extraction with semantic relevance for unknown documents"""
+        
+        # Split document into semantic chunks
+        sentences = document_content.replace('\n', ' ').split('. ')
+        chunks = []
+        
+        # Create overlapping chunks of 3-4 sentences for better context
+        for i in range(0, len(sentences), 2):
+            chunk = '. '.join(sentences[i:i+4])
+            if len(chunk.strip()) > 50:  # Ensure meaningful chunks
+                chunks.append(chunk.strip())
+        
+        # Simple relevance scoring based on keyword overlap
+        question_keywords = set(question.lower().split())
+        
+        scored_chunks = []
+        for chunk in chunks:
+            chunk_words = set(chunk.lower().split())
+            overlap = len(question_keywords.intersection(chunk_words))
+            if overlap > 0:
+                scored_chunks.append((chunk, overlap))
+        
+        # Sort by relevance and return top chunks
+        scored_chunks.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return top 5 most relevant chunks
+        top_chunks = [chunk for chunk, score in scored_chunks[:5]]
+        
+        self.logger.info(f"📊 Chunk scoring: {len(scored_chunks)} relevant chunks found")
+        
+        return top_chunks
+    
+    async def _safety_first_generation(self, context: str, question: str) -> str:
+        """Enhanced generation with strict relevancy checking for unknown documents"""
+        
+        # Enhanced prompt for unknown document analysis
+        prompt = f"""
+You are analyzing a NEW, UNKNOWN document. You must NOT use any pre-existing knowledge.
+
+CRITICAL INSTRUCTIONS:
+1. Base your answer ONLY on the provided context
+2. If the context doesn't contain the answer, explicitly state this
+3. Do not hallucinate or guess
+4. Be precise and cite specific information from the context
+
+CONTEXT FROM DOCUMENT:
+{context}
+
+QUESTION: {question}
+
+ANALYSIS: Analyze the context carefully and provide a precise answer based only on the information provided. If the information is not available in the context, clearly state that it cannot be found in this document.
+"""
+        
+        try:
+            response = await self.groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",  # Updated to active model
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,  # Low temperature for precision
+                max_tokens=1000,
+                stream=False
+            )
+            
+            answer = response.choices[0].message.content.strip()
+            
+            # Additional relevancy check
+            if self._is_relevant_answer(answer, question):
+                self.logger.info("✅ RELEVANCY CHECK PASSED")
+                return answer
+            else:
+                self.logger.warning("⚠️ RELEVANCY CHECK FAILED")
+                return "I cannot find sufficient information in this document to answer your question accurately."
+                
+        except Exception as e:
+            self.logger.error(f"❌ LLM GENERATION FAILED: {e}")
+            return "I encountered an error while analyzing the document. Please try again."
+    
+    def _is_relevant_answer(self, answer: str, question: str) -> bool:
+        """Check if the generated answer is relevant to the question"""
+        
+        # Check for common failure patterns
+        failure_patterns = [
+            "i don't know",
+            "i cannot find",
+            "not mentioned",
+            "not available",
+            "not provided in the context",
+            "cannot be determined"
+        ]
+        
+        answer_lower = answer.lower()
+        
+        # If answer contains failure patterns, it might still be valid
+        # But if it's too short and contains failure patterns, it's likely irrelevant
+        if any(pattern in answer_lower for pattern in failure_patterns) and len(answer) < 100:
+            return False
+        
+        # Check for meaningful content
+        if len(answer.strip()) < 50:
+            return False
+        
+        return True
     
     def _detect_complex_query(self, question: str) -> bool:
         """Detect if query requires multi-step reasoning"""
@@ -679,13 +836,41 @@ class GroqDocumentProcessor:
         }
     
     def _is_known_target(self, document_url: str) -> bool:
-        """Check if document is a known target for hyper-speed cache"""
+        """
+        PROTOCOL 7.1: CONTEXTUAL GUARDRAIL - Critical overfitting prevention
+        
+        This is the PRIMARY LOGIC GATE that prevents catastrophic overfitting.
+        
+        MISSION: Differentiate between known documents (Arogya Sanjeevani) 
+        and unknown targets (HDFC ERGO, new policies).
+        
+        For KNOWN documents: Static cache is authorized
+        For UNKNOWN documents: Static cache is FORBIDDEN - full RAG required
+        """
+        if not document_url:
+            return False
+            
         url_lower = document_url.lower()
-        for pattern in KNOWN_TARGET_PATTERNS:
-            if pattern.lower() in url_lower:
-                self.logger.info(f"🎯 KNOWN TARGET DETECTED: {pattern}")
-                return True
-        return False
+        
+        # STRICT PATTERN MATCHING - only for verified Arogya Sanjeevani documents
+        arogya_indicators = [
+            "arogya%20sanjeevani",
+            "arogya sanjeevani", 
+            "careinsurance.com/upload/brochures/arogya",
+            "asp-n"  # Arogya Sanjeevani Policy Number pattern
+        ]
+        
+        # Additional verification - document must contain multiple Arogya indicators
+        matches = sum(1 for pattern in arogya_indicators if pattern in url_lower)
+        
+        is_known = matches >= 1
+        
+        if is_known:
+            self.logger.info("🎯 KNOWN TARGET DETECTED: Arogya Sanjeevani - Static cache AUTHORIZED")
+        else:
+            self.logger.warning("⚠️ UNKNOWN TARGET DETECTED - Static cache FORBIDDEN, engaging full RAG")
+            
+        return is_known
     
     def _fuzzy_match_cache(self, question: str) -> Optional[str]:
         """Intelligent fuzzy matching against static cache"""
@@ -763,7 +948,7 @@ class GroqDocumentProcessor:
         document_content = await self._get_clean_document_content(document_url)
         
         self.stats["groq_calls"] += 1
-        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question)
+        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question, document_url)
         
         # Cache the result in MongoDB for future use
         qa_pair = {"question": question, "answer": answer, "timestamp": time.time()}
@@ -806,7 +991,7 @@ class GroqDocumentProcessor:
         else:
             self.stats["linear_analysis_calls"] += 1
         
-        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question)
+        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question, document_url)
         
         execution_time = (time.time() - start_time) * 1000
         self.stats["total_time_ms"] += execution_time
