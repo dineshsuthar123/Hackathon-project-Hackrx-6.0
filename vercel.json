@@ -2,14 +2,17 @@
     "version": 2,
     "builds": [
         {
-            "src": "api/index.py",
-            "use": "@vercel/python"
+            "src": "main.py",
+            "use": "@vercel/python",
+            "config": {
+                "maxLambdaSize": "50mb"
+            }
         }
     ],
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "api/index.py"
+            "dest": "main.py"
         }
     ],
     "env": {
@@ -17,15 +20,12 @@
         "MONGODB_URI": "@mongodb_uri",
         "HACKRX_API_TOKEN": "@hackrx_api_token",
         "MONGODB_DATABASE": "@mongodb_database",
-        "MONGODB_COLLECTION": "@mongodb_collection"
+        "MONGODB_COLLECTION": "@mongodb_collection",
+        "PYTHONPATH": "."
     },
     "functions": {
-        "api/index.py": {
-            "maxDuration": 30,
-            "runtime": "python3.9"
+        "main.py": {
+            "maxDuration": 30
         }
-    },
-    "regions": [
-        "iad1"
-    ]
+    }
 }
