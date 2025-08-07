@@ -1,31 +1,7 @@
 {
-    "version": 2,
-    "builds": [
-        {
-            "src": "main.py",
-            "use": "@vercel/python",
-            "config": {
-                "maxLambdaSize": "50mb"
-            }
-        }
-    ],
-    "routes": [
-        {
-            "src": "/(.*)",
-            "dest": "main.py"
-        }
-    ],
-    "env": {
-        "GROQ_API_KEY": "@groq_api_key",
-        "MONGODB_URI": "@mongodb_uri",
-        "HACKRX_API_TOKEN": "@hackrx_api_token",
-        "MONGODB_DATABASE": "@mongodb_database",
-        "MONGODB_COLLECTION": "@mongodb_collection",
-        "PYTHONPATH": "."
-    },
     "functions": {
-        "main.py": {
-            "maxDuration": 30
+        "api/index.py": {
+            "runtime": "python3.9"
         }
     }
 }
