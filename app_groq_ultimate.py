@@ -336,21 +336,29 @@ NEVER guess. NEVER approximate. ONLY provide information that is explicitly stat
             return await self._local_intelligent_analysis(document_content, question)
     
     async def _check_question_relevancy(self, document_content: str, question: str) -> bool:
-        """PROTOCOL 5.1: Check if question can be answered from document context"""
+        """PROTOCOL 5.1: FINAL CALIBRATION - Check if question can be answered from document context"""
         
         if not self.groq_client:
             return True  # Skip relevancy check for local fallback
         
         try:
-            # Truncate document for relevancy check (faster processing)
+            # VALIDATION: Log the exact context being used for relevancy check
             context_preview = document_content[:2000] + "..." if len(document_content) > 2000 else document_content
             
+            # DEBUG LOGGING: Validate context quality
+            self.logger.info(f"🔍 RELEVANCY CONTEXT VALIDATION:")
+            self.logger.info(f"   📊 Full document length: {len(document_content)} characters")
+            self.logger.info(f"   📄 Context preview length: {len(context_preview)} characters")
+            self.logger.info(f"   ❓ Question: {question}")
+            self.logger.info(f"   📋 Context preview: {context_preview[:300]}...")
+            
+            # FINAL CALIBRATION: More flexible relevancy prompt
             relevancy_response = await self.groq_client.chat.completions.create(
                 model=GROQ_FAST_MODEL,  # Use fast model for relevancy check
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are a relevancy checker. Based ONLY on the provided context, is it possible to answer the user's question? Respond with only the single word "Yes" or "No"."""
+                        "content": """You are a helpful assistant. Does the following context contain information that could help answer the user's question? Answer with only the word "Yes" or "No"."""
                     },
                     {
                         "role": "user",
@@ -369,7 +377,16 @@ ANSWER:"""
             relevancy_result = relevancy_response.choices[0].message.content.strip().lower()
             is_relevant = relevancy_result == "yes"
             
-            self.logger.info(f"🔍 RELEVANCY CHECK: {'✅ RELEVANT' if is_relevant else '❌ NOT RELEVANT'}")
+            # ENHANCED LOGGING: Track false negatives
+            self.logger.info(f"🔍 RELEVANCY CHECK RESULT: {'✅ RELEVANT' if is_relevant else '❌ NOT RELEVANT'}")
+            self.logger.info(f"   🤖 Model response: '{relevancy_result}'")
+            
+            if not is_relevant:
+                self.logger.warning(f"⚠️ POTENTIAL FALSE NEGATIVE DETECTED:")
+                self.logger.warning(f"   ❓ Question: {question}")
+                self.logger.warning(f"   📄 Context had {len(context_preview)} chars of content")
+                self.logger.warning(f"   🔍 Consider if this rejection is correct")
+            
             return is_relevant
             
         except Exception as e:
@@ -582,6 +599,7 @@ class GroqDocumentProcessor:
             "groq_calls": 0,
             "relevancy_checks": 0,
             "irrelevant_questions": 0,
+            "potential_false_negatives": 0,
             "total_questions": 0,
             "total_time_ms": 0
         }
@@ -706,13 +724,16 @@ class GroqDocumentProcessor:
         # LEVEL 3: STRATEGIC GROQ INTELLIGENCE ANALYSIS (with PROTOCOLS 5.1 & 5.2)
         self.stats["groq_calls"] += 1
         
-        # PROTOCOL 5.1: RELEVANCY CONFIRMATION FILTER
+        # PROTOCOL 5.1: RELEVANCY CONFIRMATION FILTER - FINAL CALIBRATION
         if self.groq_engine.groq_client:
+            self.stats["relevancy_checks"] += 1
             relevancy_check = await self.groq_engine._check_question_relevancy(document_content, question)
             if not relevancy_check:
+                self.stats["irrelevant_questions"] += 1
+                self.stats["potential_false_negatives"] += 1
                 execution_time = (time.time() - start_time) * 1000
                 self.stats["total_time_ms"] += execution_time
-                self.logger.info(f"❌ IRRELEVANT QUESTION: {execution_time:.1f}ms")
+                self.logger.info(f"❌ IRRELEVANT QUESTION (POTENTIAL FALSE NEGATIVE): {execution_time:.1f}ms")
                 return "Information not found in document."
         
         answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question)
@@ -990,9 +1011,10 @@ async def process_document_questions(
         logger.info(f"   🧠 Groq calls: {groq_processor.stats['groq_calls']}")
         logger.info(f"   🔍 Relevancy checks: {groq_processor.stats.get('relevancy_checks', 0)}")
         logger.info(f"   ❌ Irrelevant questions: {groq_processor.stats.get('irrelevant_questions', 0)}")
+        logger.info(f"   ⚠️ Potential false negatives: {groq_processor.stats.get('potential_false_negatives', 0)}")
         logger.info(f"   ⏱️ Total time: {total_time:.1f}ms")
         logger.info(f"   🎯 Questions processed: {groq_processor.stats['total_questions']}")
-        logger.info("   🚀 STRATEGIC PROTOCOLS 5.1 & 5.2: ACTIVE")
+        logger.info("   🚀 STRATEGIC PROTOCOLS 5.1 & 5.2: FINAL CALIBRATION ACTIVE")
         
         return HackRxResponse(answers=answers)
         
