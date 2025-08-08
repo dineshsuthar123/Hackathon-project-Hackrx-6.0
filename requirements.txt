@@ -40,6 +40,11 @@ pdfplumber==0.10.3           # Secondary extraction (~1MB)
 numpy>=1.24.0,<2.0.0        # Essential numerical operations (~5MB)
 
 # =============================================================================
+# 🧠 OPTIONAL L2 CACHE (Redis) - small footprint
+# =============================================================================
+redis>=5.0.0                # Async Redis client (aioredis via redis.asyncio)
+
+# =============================================================================
 # 🚫 FORBIDDEN LIBRARIES - DO NOT INCLUDE IN PRODUCTION
 # =============================================================================
 # torch                      # ~800MB - FORBIDDEN
