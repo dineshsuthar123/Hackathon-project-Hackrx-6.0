@@ -77,6 +77,14 @@ except ImportError:
     PYPDF2_AVAILABLE = False
     PyPDF2 = None
 
+# Optional Redis (L2 cache)
+try:
+    import redis.asyncio as aioredis  # type: ignore
+    REDIS_AVAILABLE = True
+except Exception:
+    aioredis = None  # type: ignore
+    REDIS_AVAILABLE = False
+
 # Load environment variables
 load_dotenv()
 
@@ -312,7 +320,7 @@ class GroqIntelligenceEngine:
             self.logger.info("📚 Engaging GENERALIZED RAG for new document comprehension")
             
             # PROTOCOL 7.2: Enhanced processing for unknown documents
-            return await self._generalized_rag_analysis(document_content, question)
+            return await self._generalized_rag_analysis(document_content, question, processor)
         
         # For known documents, use existing logic
         is_complex_query = self._detect_complex_query(question)
@@ -328,14 +336,14 @@ class GroqIntelligenceEngine:
         # Linear analysis for simple queries on known documents
         return await self._linear_analysis(document_content, question)
     
-    async def _generalized_rag_analysis(self, document_content: str, question: str) -> str:
+    async def _generalized_rag_analysis(self, document_content: str, question: str, processor=None) -> str:
         """
         PROTOCOL 7.2: Core Generalized RAG Pipeline for Unknown Targets
         
         Steps:
         1. Full Ingestion - ensure complete document loading
-        2. Precision Retrieval - robust chunk extraction with re-ranking
-        3. Safety-First Generation - relevancy check + LLM generation
+        2. Precision Retrieval (ARTEMIS) - sub-query decomposition + parallel re-ranking
+        3. Zero-Fluff Generation (APOLLO) - minimal, precise, source-grounded
         """
         
         self.logger.info("🔄 STEP 1: FULL INGESTION - Loading complete document")
@@ -347,10 +355,44 @@ class GroqIntelligenceEngine:
         
         self.logger.info(f"✅ Document loaded: {len(document_content)} characters")
         
-        self.logger.info("🔄 STEP 2: PRECISION RETRIEVAL - Extracting relevant chunks")
+        self.logger.info("🔄 STEP 2: PRECISION RETRIEVAL (ARTEMIS) - Decompose and parallel extract")
         
-        # Enhanced chunk extraction for unknown documents
-        relevant_chunks = await self._extract_precision_chunks(document_content, question)
+        # Build or reuse prebuilt chunks
+        prebuilt_chunks = None
+        if processor and hasattr(processor, "_get_or_build_chunks"):
+            try:
+                prebuilt_chunks = processor._get_or_build_chunks(document_content)
+            except Exception as e:
+                self.logger.warning(f"⚠️ Prebuilt chunks unavailable: {e}")
+                prebuilt_chunks = None
+
+        # Decompose into sub-queries (ARTEMIS)
+        sub_queries = self._decompose_question(question)
+        self.logger.info(f"🧩 Sub-queries: {len(sub_queries)} -> {sub_queries}")
+
+        # Run parallel chunk extraction for each sub-query
+        tasks = [
+            self._extract_precision_chunks(document_content, sq, prebuilt_chunks=prebuilt_chunks)
+            for sq in sub_queries
+        ]
+
+        results = []
+        try:
+            results = await asyncio.gather(*tasks)
+        except Exception as e:
+            self.logger.warning(f"⚠️ Parallel extraction failed, falling back to single query: {e}")
+            results = [await self._extract_precision_chunks(document_content, question, prebuilt_chunks=prebuilt_chunks)]
+
+        # Merge and dedupe chunks, keep top few
+        merged = []
+        seen = set()
+        for lst in results:
+            for ch in lst:
+                key = ch[:200]
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(ch)
+        relevant_chunks = merged[:8]
         
         if not relevant_chunks:
             self.logger.error("❌ CRITICAL FAILURE: No relevant content found")
@@ -358,29 +400,27 @@ class GroqIntelligenceEngine:
         
         self.logger.info(f"✅ Relevant chunks extracted: {len(relevant_chunks)} chunks")
         
-        self.logger.info("🔄 STEP 3: SAFETY-FIRST GENERATION - Relevancy check + LLM analysis")
-        
-        # Enhanced prompt for unknown documents
+        self.logger.info("🔄 STEP 3: ZERO-FLUFF GENERATION (APOLLO) - Minimal, precise answer")
         enhanced_context = "\n\n".join(relevant_chunks)
-        
-        return await self._safety_first_generation(enhanced_context, question)
+        return await self._zero_fluff_generation(enhanced_context, question)
     
-    async def _extract_precision_chunks(self, document_content: str, question: str) -> List[str]:
-        """Enhanced chunk extraction with semantic relevance for unknown documents"""
+    async def _extract_precision_chunks(self, document_content: str, question: str, prebuilt_chunks: Optional[List[str]] = None) -> List[str]:
+        """Enhanced chunk extraction with semantic relevance for unknown documents.
+        If prebuilt_chunks are provided, reuse them to avoid re-splitting."""
         
-        # Split document into semantic chunks
-        sentences = document_content.replace('\n', ' ').split('. ')
-        chunks = []
-        
-        # Create overlapping chunks of 3-4 sentences for better context
-        for i in range(0, len(sentences), 2):
-            chunk = '. '.join(sentences[i:i+4])
-            if len(chunk.strip()) > 50:  # Ensure meaningful chunks
-                chunks.append(chunk.strip())
+        # Use prebuilt chunks if available, else split
+        if prebuilt_chunks is not None:
+            chunks = prebuilt_chunks
+        else:
+            sentences = document_content.replace('\n', ' ').split('. ')
+            chunks = []
+            for i in range(0, len(sentences), 2):
+                chunk = '. '.join(sentences[i:i+4])
+                if len(chunk.strip()) > 50:
+                    chunks.append(chunk.strip())
         
         # Simple relevance scoring based on keyword overlap
         question_keywords = set(question.lower().split())
-        
         scored_chunks = []
         for chunk in chunks:
             chunk_words = set(chunk.lower().split())
@@ -388,15 +428,115 @@ class GroqIntelligenceEngine:
             if overlap > 0:
                 scored_chunks.append((chunk, overlap))
         
-        # Sort by relevance and return top chunks
         scored_chunks.sort(key=lambda x: x[1], reverse=True)
-        
-        # Return top 5 most relevant chunks
         top_chunks = [chunk for chunk, score in scored_chunks[:5]]
-        
         self.logger.info(f"📊 Chunk scoring: {len(scored_chunks)} relevant chunks found")
-        
         return top_chunks
+
+    def _decompose_question(self, question: str) -> List[str]:
+        """ARTEMIS: Lightweight sub-query decomposition without extra model calls."""
+        q = question.strip()
+        if len(q) < 12:
+            return [q]
+        # Split on common conjunctions to get 1-3 sub-queries
+        parts = re.split(r"\b(?:and|also|as well as|plus|,|;|&)\b", q, maxsplit=2, flags=re.IGNORECASE)
+        subs = [p.strip() for p in parts if len(p.strip()) > 0]
+        # Ensure original question is included for completeness
+        if q not in subs:
+            subs.append(q)
+        # Deduplicate while preserving order
+        seen = set()
+        uniq = []
+        for s in subs:
+            k = s.lower()
+            if k not in seen:
+                seen.add(k)
+                uniq.append(s)
+        return uniq[:3]
+
+    async def _zero_fluff_generation(self, context: str, question: str) -> str:
+        """APOLLO: Enforce zero-fluff, source-grounded answers."""
+        # Local fallback when Groq client isn't available (e.g., offline tests)
+        if not self.groq_client:
+            ql = question.lower()
+            cl = context.lower()
+            fact = None
+            # Target common insurance queries
+            # 1) Waiting period patterns
+            if 'waiting' in ql or 'pre-existing' in ql or 'preexisting' in ql:
+                m = re.search(r'(pre[- ]?existing[^\n\r\.]*)?(after|within|of)?\s*(\d+\s*(?:years?|months?|days?))', cl)
+                if m:
+                    fact = f"EXTRACTED FACT: Waiting period is {m.group(3)}."
+                    snippet = m.group(0)[:160]
+                    return fact + f"\nSOURCE SNIPPET: {snippet}"
+            # 2) Percentages (co-payment etc.)
+            m = re.search(r'(\d+\s*%)', cl)
+            if not fact and m:
+                fact = f"EXTRACTED FACT: {m.group(1)}"
+                snippet = cl[max(0, m.start()-40):m.end()+40][:160]
+                return fact + f"\nSOURCE SNIPPET: {snippet}"
+            # 3) Currency caps
+            m = re.search(r'rs\.?\s*[₹]?[\s]*([0-9][0-9,]*)', cl)
+            if not fact and m:
+                amount = m.group(1)
+                fact = f"EXTRACTED FACT: Rs. {amount}"
+                snippet = cl[max(0, m.start()-40):m.end()+40][:160]
+                return fact + f"\nSOURCE SNIPPET: {snippet}"
+            # 4) Generic numeric duration
+            m = re.search(r'(\d+\s*(?:years?|months?|days?))', cl)
+            if not fact and m:
+                fact = f"EXTRACTED FACT: {m.group(1)}"
+                snippet = cl[max(0, m.start()-40):m.end()+40][:160]
+                return fact + f"\nSOURCE SNIPPET: {snippet}"
+            # Fallback when nothing matches
+            return "EXTRACTED FACT: Not found in document context."
+
+        prompt = f"""
+You are a precision extraction engine. Answer ONLY with the extracted fact. No preface, no extra words.
+
+RULES:
+- Base the answer ONLY on CONTEXT.
+- If answer isn't present in CONTEXT, say: "EXTRACTED FACT: Not found in document context."
+- Format strictly:
+  EXTRACTED FACT: <one-line fact>
+  SOURCE SNIPPET: <short supporting quote>
+
+CONTEXT:
+{context}
+
+QUESTION: {question}
+"""
+        try:
+            response = await self.groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=180,
+                top_p=0.1,
+                stream=False,
+            )
+            raw = response.choices[0].message.content.strip()
+            return self._enforce_zero_fluff(raw)
+        except Exception as e:
+            self.logger.error(f"❌ ZERO-FLUFF GENERATION FAILED: {e}")
+            # Fallback to safety-first generation
+            return await self._safety_first_generation(context, question)
+
+    def _enforce_zero_fluff(self, text: str) -> str:
+        """Post-process to ensure minimal, deterministic output."""
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        fact = None
+        source = None
+        for ln in lines:
+            if ln.lower().startswith("extracted fact:") and not fact:
+                fact = ln
+            if ln.lower().startswith("source snippet:") and not source:
+                source = ln
+        if fact:
+            return fact + ("\n" + source if source else "")
+        # If pattern missing, compress to first sentence only
+        m = re.split(r"[\.!?]", text)
+        return (m[0].strip() + ".") if m and m[0].strip() else text
     
     async def _safety_first_generation(self, context: str, question: str) -> str:
         """Enhanced generation with strict relevancy checking for unknown documents"""
@@ -814,13 +954,21 @@ Provide a clear, concise, and completely accurate answer based ONLY on what is e
 
 class GroqDocumentProcessor:
     """Ultimate document processing with Groq intelligence and MongoDB caching"""
-    
+
     def __init__(self):
         self.document_cache = {}
         self.groq_engine = GroqIntelligenceEngine()
         self.mongodb_manager = MongoDBManager()
         self.logger = logging.getLogger(__name__)
-        
+
+        # KAIROS: L1 session cache and prebuilt chunks cache
+        self.session_cache = {}
+        self.chunks_cache = {}
+
+        # KAIROS: Optional Redis L2 cache
+        self.redis = None
+        self._init_redis()
+
         # Performance tracking - PROTOCOL 7.0
         self.stats = {
             "cache_hits": 0,
@@ -834,7 +982,7 @@ class GroqDocumentProcessor:
             "complex_queries": 0,
             "react_reasoning_calls": 0,
             "linear_analysis_calls": 0,
-            "reasoning_steps_total": 0
+            "reasoning_steps_total": 0,
         }
     
     def _is_known_target(self, document_url: str) -> bool:
@@ -968,6 +1116,12 @@ class GroqDocumentProcessor:
         """PROTOCOL 7.0: Process single question with ReAct reasoning + STRATEGIC PROTOCOLS"""
         start_time = time.time()
         self.stats["total_questions"] += 1
+        # KAIROS: Check L1/L2 caches first
+        cache_key = self._answer_cache_key(document_url, question)
+        cached = await self._get_cached_answer(cache_key)
+        if cached:
+            self.logger.info("⚡ L1/L2 CACHE HIT: Returning cached answer")
+            return cached
         
         # LEVEL 1: HYPER-SPEED STATIC CACHE (for known documents)
         if self._is_known_target(document_url):
@@ -993,7 +1147,9 @@ class GroqDocumentProcessor:
         else:
             self.stats["linear_analysis_calls"] += 1
         
-        answer = await self.groq_engine.analyze_document_with_intelligence(document_content, question, document_url, self)
+        answer = await self.groq_engine.analyze_document_with_intelligence(
+            document_content, question, document_url, self
+        )
         
         execution_time = (time.time() - start_time) * 1000
         self.stats["total_time_ms"] += execution_time
@@ -1002,8 +1158,8 @@ class GroqDocumentProcessor:
         self.logger.info(f"🎯 {reasoning_type} ANALYSIS COMPLETE: {execution_time:.1f}ms")
         self.logger.info(f"✅ FINAL ANSWER: {answer}")
         
-        return answer
-        
+        # KAIROS: Save answer to L1/L2 caches
+        await self._set_cached_answer(cache_key, answer)
         return answer
     
     async def _get_clean_document_content(self, document_url: str) -> str:
@@ -1033,6 +1189,55 @@ class GroqDocumentProcessor:
         except Exception as e:
             self.logger.error(f"❌ Document processing failed: {e}")
             return self._get_fallback_content()
+
+    # -------------------- KAIROS: Caching helpers --------------------
+    def _init_redis(self) -> None:
+        try:
+            redis_url = os.getenv("REDIS_URL") or os.getenv("REDIS_CONNECTION_STRING")
+            if REDIS_AVAILABLE and redis_url:
+                self.redis = aioredis.from_url(redis_url, encoding="utf-8", decode_responses=True)
+                self.logger.info("🧠 REDIS: L2 cache initialized")
+        except Exception as e:
+            self.logger.warning(f"⚠️ REDIS INIT FAILED: {e}")
+            self.redis = None
+
+    def _answer_cache_key(self, document_url: str, question: str) -> str:
+        raw = f"ans::{document_url}::{question}"
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    async def _get_cached_answer(self, key: str) -> Optional[str]:
+        if key in self.session_cache:
+            return self.session_cache[key]
+        try:
+            if self.redis:
+                return await self.redis.get(key)
+        except Exception as e:
+            self.logger.warning(f"⚠️ REDIS GET FAILED: {e}")
+        return None
+
+    async def _set_cached_answer(self, key: str, value: str) -> None:
+        self.session_cache[key] = value
+        try:
+            if self.redis:
+                await self.redis.set(key, value, ex=60 * 60 * 12)  # 12h TTL
+        except Exception as e:
+            self.logger.warning(f"⚠️ REDIS SET FAILED: {e}")
+
+    def _chunks_cache_key(self, document_content: str) -> str:
+        return hashlib.md5(document_content[:10000].encode()).hexdigest()
+
+    def _get_or_build_chunks(self, document_content: str) -> List[str]:
+        key = self._chunks_cache_key(document_content)
+        if key in self.chunks_cache:
+            return self.chunks_cache[key]
+        sentences = document_content.replace('\n', ' ').split('. ')
+        chunks: List[str] = []
+        for i in range(0, len(sentences), 2):
+            chunk = '. '.join(sentences[i:i+4]).strip()
+            if len(chunk) > 50:
+                chunks.append(chunk)
+        self.chunks_cache[key] = chunks
+        return chunks
     
     async def _extract_clean_text(self, pdf_bytes: bytes) -> str:
         """MISSION-CRITICAL: Full PDF extraction for complete document ingestion"""
