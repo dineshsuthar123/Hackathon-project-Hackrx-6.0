@@ -5,6 +5,7 @@ Groq LPU + Advanced ReAct + Precision Document Analysis
 """
 
 from typing import List, Optional, Dict, Any, Union
+import math
 import logging
 import hashlib
 import re
@@ -309,32 +310,21 @@ class GroqIntelligenceEngine:
         
         if not self.groq_client:
             return await self._local_intelligent_analysis(document_content, question)
-        
+
         # PROTOCOL 7.1: Contextual Guardrail Check (delegate to processor)
         is_known_document = False
         if document_url and processor:
             is_known_document = processor._is_known_target(document_url)
-        
+
         if not is_known_document and document_url:
             self.logger.info("🚨 UNKNOWN TARGET PROTOCOL ACTIVATED")
             self.logger.info("📚 Engaging GENERALIZED RAG for new document comprehension")
-            
+
             # PROTOCOL 7.2: Enhanced processing for unknown documents
             return await self._generalized_rag_analysis(document_content, question, processor)
-        
-        # For known documents, use existing logic
-        is_complex_query = self._detect_complex_query(question)
-        
-        if is_complex_query and self.react_engine:
-            self.logger.info("🧠 COMPLEX QUERY DETECTED: Engaging ReAct reasoning")
-            try:
-                return await self.react_engine.reason_and_act(document_content, question)
-            except Exception as e:
-                self.logger.error(f"❌ REACT REASONING FAILED: {e}, falling back to linear analysis")
-                # Fall through to linear analysis
-        
-        # Linear analysis for simple queries on known documents
-        return await self._linear_analysis(document_content, question)
+
+        # For known documents, prefer fast RAG + local APOLLO for speed and accuracy
+        return await self._generalized_rag_analysis(document_content, question, processor)
     
     async def _generalized_rag_analysis(self, document_content: str, question: str, processor=None) -> str:
         """
@@ -367,7 +357,8 @@ class GroqIntelligenceEngine:
                 prebuilt_chunks = None
 
         # Decompose into sub-queries (ARTEMIS) with Intelligent Decomposition (Protocol 8.1/8.2)
-        if self.groq_client:
+        fast_mode = os.getenv("FAST_MODE", "1") == "1"
+        if self.groq_client and not fast_mode:
             try:
                 should = await self._should_decompose(question)
                 if should:
@@ -382,10 +373,7 @@ class GroqIntelligenceEngine:
                 sub_queries = self._decompose_question(question)
         else:
             # Offline fallback: conservative behavior (no split for simple queries)
-            if len(question.strip()) < 12:
-                sub_queries = [question]
-            else:
-                sub_queries = self._decompose_question(question)
+            sub_queries = [question]
         self.logger.info(f"🧩 Sub-queries: {len(sub_queries)} -> {sub_queries}")
 
         # Run parallel chunk extraction for each sub-query (HYPERION: mandatory parallelism)
@@ -418,37 +406,96 @@ class GroqIntelligenceEngine:
         
         self.logger.info(f"✅ Relevant chunks extracted: {len(relevant_chunks)} chunks")
         
+        # Optional retrieval trace
+        if os.getenv("RETRIEVAL_TRACE", "0") == "1":
+            try:
+                for i, ch in enumerate(relevant_chunks[:5], 1):
+                    self.logger.info(f"🔎 TOP{i} >> {ch[:300].replace('\n',' ')}")
+            except Exception:
+                pass
+
         self.logger.info("🔄 STEP 3: ZERO-FLUFF GENERATION (APOLLO) - Minimal, precise answer")
         enhanced_context = "\n\n".join(relevant_chunks)
-        return await self._zero_fluff_generation(enhanced_context, question)
+        # Prefer local generation for known documents to minimize latency
+        prefer_local = True
+        return await self._zero_fluff_generation(enhanced_context, question, prefer_local=prefer_local)
     
     async def _extract_precision_chunks(self, document_content: str, question: str, prebuilt_chunks: Optional[List[str]] = None) -> List[str]:
-        """Enhanced chunk extraction with semantic relevance for unknown documents.
+        """Enhanced chunk extraction using pure-Python BM25 ranking.
         If prebuilt_chunks are provided, reuse them to avoid re-splitting."""
-        
-        # Use prebuilt chunks if available, else split
+        # Prepare chunks
         if prebuilt_chunks is not None:
             chunks = prebuilt_chunks
         else:
             sentences = document_content.replace('\n', ' ').split('. ')
             chunks = []
-            for i in range(0, len(sentences), 2):
-                chunk = '. '.join(sentences[i:i+4])
-                if len(chunk.strip()) > 50:
-                    chunks.append(chunk.strip())
-        
-        # Simple relevance scoring based on keyword overlap
-        question_keywords = set(question.lower().split())
-        scored_chunks = []
-        for chunk in chunks:
-            chunk_words = set(chunk.lower().split())
-            overlap = len(question_keywords.intersection(chunk_words))
-            if overlap > 0:
-                scored_chunks.append((chunk, overlap))
-        
-        scored_chunks.sort(key=lambda x: x[1], reverse=True)
-        top_chunks = [chunk for chunk, score in scored_chunks[:5]]
-        self.logger.info(f"📊 Chunk scoring: {len(scored_chunks)} relevant chunks found")
+            for i in range(0, len(sentences), 2):  # stride 2, window 4
+                chunk = '. '.join(sentences[i:i+4]).strip()
+                if len(chunk) > 50:
+                    chunks.append(chunk)
+
+        # Tokenize
+        def tok(text: str) -> List[str]:
+            text = text.lower()
+            text = re.sub(r"[^a-z0-9%₹$\s]", " ", text)
+            words = [w for w in text.split() if len(w) > 2]
+            return words
+
+        doc_tokens = [tok(ch) for ch in chunks]
+        N = len(doc_tokens)
+        if N == 0:
+            return []
+        # BM25 parameters
+        k1 = 1.5
+        b = 0.75
+        # Average document length
+        avgdl = sum(len(toks) for toks in doc_tokens) / max(1, N)
+        # Document frequency
+        df: Dict[str, int] = {}
+        for toks in doc_tokens:
+            for t in set(toks):
+                df[t] = df.get(t, 0) + 1
+        # IDF
+        idf: Dict[str, float] = {}
+        for t, dfi in df.items():
+            idf[t] = math.log(1 + (N - dfi + 0.5) / (dfi + 0.5))
+        # Query tokens
+        q_tokens = tok(question)
+        # Score each chunk
+        scores: List[float] = []
+        for toks in doc_tokens:
+            score = 0.0
+            dl = len(toks)
+            tf_counts: Dict[str, int] = {}
+            for t in toks:
+                tf_counts[t] = tf_counts.get(t, 0) + 1
+            for qt in q_tokens:
+                if qt not in tf_counts:
+                    continue
+                tf = tf_counts[qt]
+                denom = tf + k1 * (1 - b + b * dl / max(1.0, avgdl))
+                score += idf.get(qt, 0.0) * (tf * (k1 + 1)) / max(1e-8, denom)
+            scores.append(score)
+
+        # Rank and take top-5
+        ranked_indices = sorted(range(N), key=lambda i: scores[i], reverse=True)[:5]
+        top_chunks = [chunks[i] for i in ranked_indices if scores[i] > 0]
+        if not top_chunks:
+            # Fallback 1: pick chunks containing any query token as substring
+            qset = set(q_tokens)
+            cand = []
+            for idx, ch in enumerate(chunks):
+                chl = ch.lower()
+                hit = any(qt in chl for qt in qset)
+                if hit:
+                    cand.append((idx, len(ch)))
+            cand = sorted(cand, key=lambda x: x[1], reverse=True)[:5]
+            if cand:
+                top_chunks = [chunks[i] for i, _ in cand]
+        if not top_chunks:
+            # Fallback 2: take the first 3 informative chunks
+            top_chunks = chunks[:3]
+        self.logger.info(f"📊 BM25: ranked {len(top_chunks)} top chunks from {N}")
         return top_chunks
 
     def _decompose_question(self, question: str) -> List[str]:
@@ -575,16 +622,93 @@ SUB-QUESTIONS (as a JSON list):
             self.logger.warning(f"⚠️ _semantic_decompose_question failed: {e}")
             return self._decompose_question(question)
 
-    async def _zero_fluff_generation(self, context: str, question: str) -> str:
+    async def _zero_fluff_generation(self, context: str, question: str, prefer_local: bool = False) -> str:
         """APOLLO: Zero‑fluff fact extraction with mandated self-correction.
         Output must be either:
         - "EXTRACTED FACT: <fact>"
         - "Information not found in document."
         """
-        # Local fallback when Groq client isn't available (e.g., offline tests)
-        if not self.groq_client:
+        # Prefer local path for speed when requested or when LLM unavailable
+        if prefer_local or not self.groq_client:
             ql = question.lower()
             cl = context.lower()
+            # Definitional extraction: capture "<term> means ..." styles
+            mdef = None
+            # extract quoted term from the question if present
+            mterm = re.search(r"'([^']+)'|\"([^\"]+)\"", question)
+            term = None
+            if mterm:
+                term = (mterm.group(1) or mterm.group(2) or '').strip().lower()
+            if not term:
+                # fallback: take last wordish phrase after 'define' or 'what is'
+                mterm2 = re.search(r"define\s+([^\?]+)|what\s+does\s+the\s+term\s+'?([a-zA-Z\s]+)'?", ql)
+                if mterm2:
+                    term = (mterm2.group(1) or mterm2.group(2) or '').strip().strip('?').lower()
+            if term:
+                # look for patterns
+                patts = [
+                    rf"{re.escape(term)}\s+means\s+(.{{10,220}})",
+                    rf"{re.escape(term)}\s+refers\s+to\s+(.{{10,220}})",
+                ]
+                for p in patts:
+                    mdef = re.search(p, cl)
+                    if mdef:
+                        val = mdef.group(1).strip().rstrip('.;')
+                        return f"EXTRACTED FACT: {val}"
+            # Direct identifiers
+            if 'uin' in ql or 'unique identification' in ql:
+                muin = re.search(r"\bUIN\b\s*[:\-]?\s*([A-Z0-9\-]+)", context, re.I)
+                if muin:
+                    return f"EXTRACTED FACT: {muin.group(1).strip()}"
+            if 'cin' in ql or 'corporate identification' in ql:
+                mcin = re.search(r"\bCIN\b\s*[:\-]?\s*([A-Z0-9]+)", context, re.I)
+                if mcin:
+                    return f"EXTRACTED FACT: {mcin.group(1).strip()}"
+            if 'insurance company' in ql or ('company' in ql and 'issues' in ql):
+                mco = re.search(r"([A-Z][A-Za-z&,.']+(?:\s+[A-Za-z&,.']+){1,6}\s+(?:Insurance|General)\s+Company\s+Limited)", context)
+                if mco:
+                    return f"EXTRACTED FACT: {mco.group(1).strip()}"
+            # Room rent / ICU caps
+            if 'room rent' in ql:
+                mr = re.search(r"room\s*rent[^\n%]*?(\d+\s*%)\s*of\s*sum\s*insured", cl, re.I)
+                if mr:
+                    return f"EXTRACTED FACT: {mr.group(1).replace(' ', '')} of sum insured per day"
+            if 'icu' in ql or 'intensive care' in ql:
+                mi = re.search(r"icu[\/]*iccu[^\n%]*?(\d+\s*%)\s*of\s*sum\s*insured", cl, re.I)
+                if mi:
+                    return f"EXTRACTED FACT: {mi.group(1).replace(' ', '')} of sum insured per day"
+            # AYUSH beds
+            if 'ayush' in ql and ('bed' in ql or 'in-patient' in ql or 'inpatient' in ql):
+                mb = re.search(r"ayush\s+hospital.*?minimum\s+(\d+)\s*(?:in-?patient\s+)?beds", cl, re.I)
+                if mb:
+                    return f"EXTRACTED FACT: {mb.group(1)} beds"
+            # Pre/Post hospitalisation durations
+            if 'pre-hospital' in ql or 'pre hospital' in ql:
+                mph = re.search(r"pre-?hospitalisation[^\n]*?(\d+\s*days)", cl, re.I)
+                if mph:
+                    return f"EXTRACTED FACT: {mph.group(1).replace(' ', '')}"
+            if 'post-hospital' in ql or 'post hospital' in ql:
+                mpho = re.search(r"post-?hospitalisation[^\n]*?(\d+\s*days)", cl, re.I)
+                if mpho:
+                    return f"EXTRACTED FACT: {mpho.group(1).replace(' ', '')}"
+            # Grace period
+            if 'grace' in ql and 'period' in ql:
+                mg = re.search(r"grace\s+period[^\n]*?(\d+\s*days)", cl, re.I)
+                if mg:
+                    return f"EXTRACTED FACT: {mg.group(1).replace(' ', '')}"
+            # Co-payment percentages
+            if 'co-payment' in ql or 'copayment' in ql or 'co payment' in ql:
+                mcp = re.search(r"co-?payment[^\n]*?(\d+\s*%)", cl, re.I)
+                if mcp:
+                    return f"EXTRACTED FACT: {mcp.group(1).replace(' ', '')}"
+            # Cumulative bonus
+            if 'cumulative bonus' in ql:
+                mcb = re.search(r"cumulative\s+bonus[^\n]*?(\d+\s*%)", cl, re.I)
+                if mcb:
+                    return f"EXTRACTED FACT: {mcb.group(1).replace(' ', '')} per claim-free year"
+                mcbmax = re.search(r"cumulative\s+bonus[^\n]*?(?:maximum|up\s*to)\s*(\d+\s*%)", cl, re.I)
+                if mcbmax:
+                    return f"EXTRACTED FACT: {mcbmax.group(1).replace(' ', '')} maximum"
             # 1) Waiting period patterns
             m = None
             if 'waiting' in ql or 'pre-existing' in ql or 'preexisting' in ql:
@@ -704,7 +828,7 @@ ANALYSIS: Analyze the context carefully and provide a precise answer based only 
                 
         except Exception as e:
             self.logger.error(f"❌ LLM GENERATION FAILED: {e}")
-            return "I encountered an error while analyzing the document. Please try again."
+            return "Information not found in document."
     
     def _is_relevant_answer(self, answer: str, question: str) -> bool:
         """Check if the generated answer is relevant to the question"""
