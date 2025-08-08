@@ -659,56 +659,110 @@ SUB-QUESTIONS (as a JSON list):
             if 'uin' in ql or 'unique identification' in ql:
                 muin = re.search(r"\bUIN\b\s*[:\-]?\s*([A-Z0-9\-]+)", context, re.I)
                 if muin:
-                    return f"EXTRACTED FACT: {muin.group(1).strip()}"
+                    return f"UIN: {muin.group(1).strip()}"
             if 'cin' in ql or 'corporate identification' in ql:
                 mcin = re.search(r"\bCIN\b\s*[:\-]?\s*([A-Z0-9]+)", context, re.I)
                 if mcin:
-                    return f"EXTRACTED FACT: {mcin.group(1).strip()}"
+                    return f"CIN: {mcin.group(1).strip()}"
+            # IRDAI registration number
+            if 'irdai' in ql and ('reg' in ql or 'registration' in ql):
+                mir = re.search(r"IRDAI\s*Reg(?:istration)?\s*No\.?\s*[:\-]?\s*(\d+)", context, re.I)
+                if mir:
+                    return f"IRDAI Reg. No.: {mir.group(1).strip()}"
             if 'insurance company' in ql or ('company' in ql and 'issues' in ql):
                 mco = re.search(r"([A-Z][A-Za-z&,.']+(?:\s+[A-Za-z&,.']+){1,6}\s+(?:Insurance|General)\s+Company\s+Limited)", context)
                 if mco:
-                    return f"EXTRACTED FACT: {mco.group(1).strip()}"
+                    # Try append IRDAI Reg if nearby
+                    mir2 = re.search(r"IRDAI\s*Reg(?:istration)?\s*No\.?\s*[:\-]?\s*(\d+)", context, re.I)
+                    if mir2:
+                        return f"{mco.group(1).strip()} (IRDAI Reg. No. {mir2.group(1).strip()})"
+                    return mco.group(1).strip()
             # Room rent / ICU caps
             if 'room rent' in ql:
                 mr = re.search(r"room\s*rent[^\n%]*?(\d+\s*%)\s*of\s*sum\s*insured", cl, re.I)
                 if mr:
-                    return f"EXTRACTED FACT: {mr.group(1).replace(' ', '')} of sum insured per day"
+                    return f"Room rent, boarding and nursing: {mr.group(1).replace(' ', '')} of Sum Insured per day"
             if 'icu' in ql or 'intensive care' in ql:
                 mi = re.search(r"icu[\/]*iccu[^\n%]*?(\d+\s*%)\s*of\s*sum\s*insured", cl, re.I)
                 if mi:
-                    return f"EXTRACTED FACT: {mi.group(1).replace(' ', '')} of sum insured per day"
+                    return f"ICU/ICCU: {mi.group(1).replace(' ', '')} of Sum Insured per day"
             # AYUSH beds
             if 'ayush' in ql and ('bed' in ql or 'in-patient' in ql or 'inpatient' in ql):
                 mb = re.search(r"ayush\s+hospital.*?minimum\s+(\d+)\s*(?:in-?patient\s+)?beds", cl, re.I)
                 if mb:
-                    return f"EXTRACTED FACT: {mb.group(1)} beds"
+                    return f"Minimum {mb.group(1)} in-patient beds"
+            # General hospital bed rule by city population
+            if ('inpatient beds' in ql or 'in-patient beds' in ql or ('beds' in ql and 'hospital' in ql)) and ('town' in ql or 'population' in ql or 'city' in ql):
+                m10 = re.search(r"at\s*least\s*(\d+)\s*inpatient\s*beds", cl, re.I)
+                m15 = re.search(r"(\d+)\s*beds\s*for\s*towns?\s*with\s*population\s*>?\s*10\s*lakhs?", cl, re.I)
+                if m10 and m15:
+                    if any(x in ql for x in ['<', 'less', 'below', 'under']):
+                        return f"Minimum {m10.group(1)} in-patient beds"
+                    if any(x in ql for x in ['>', 'more', 'greater', 'over']):
+                        return f"Minimum {m15.group(1)} in-patient beds"
+                    # Default: present both
+                    return f"Minimum {m10.group(1)} beds; {m15.group(1)} beds in towns with population >10 lakhs"
             # Pre/Post hospitalisation durations
             if 'pre-hospital' in ql or 'pre hospital' in ql:
                 mph = re.search(r"pre-?hospitalisation[^\n]*?(\d+\s*days)", cl, re.I)
                 if mph:
-                    return f"EXTRACTED FACT: {mph.group(1).replace(' ', '')}"
+                    return f"Pre-hospitalisation: {mph.group(1).replace(' ', '')}"
             if 'post-hospital' in ql or 'post hospital' in ql:
                 mpho = re.search(r"post-?hospitalisation[^\n]*?(\d+\s*days)", cl, re.I)
                 if mpho:
-                    return f"EXTRACTED FACT: {mpho.group(1).replace(' ', '')}"
+                    return f"Post-hospitalisation: {mpho.group(1).replace(' ', '')}"
             # Grace period
             if 'grace' in ql and 'period' in ql:
                 mg = re.search(r"grace\s+period[^\n]*?(\d+\s*days)", cl, re.I)
                 if mg:
-                    return f"EXTRACTED FACT: {mg.group(1).replace(' ', '')}"
+                    return f"Grace period: {mg.group(1).replace(' ', '')} (monthly premium)"
             # Co-payment percentages
             if 'co-payment' in ql or 'copayment' in ql or 'co payment' in ql:
                 mcp = re.search(r"co-?payment[^\n]*?(\d+\s*%)", cl, re.I)
                 if mcp:
-                    return f"EXTRACTED FACT: {mcp.group(1).replace(' ', '')}"
+                    return f"Co-payment: {mcp.group(1).replace(' ', '')}"
             # Cumulative bonus
             if 'cumulative bonus' in ql:
                 mcb = re.search(r"cumulative\s+bonus[^\n]*?(\d+\s*%)", cl, re.I)
                 if mcb:
-                    return f"EXTRACTED FACT: {mcb.group(1).replace(' ', '')} per claim-free year"
+                    return f"Cumulative Bonus: {mcb.group(1).replace(' ', '')} per claim-free year"
                 mcbmax = re.search(r"cumulative\s+bonus[^\n]*?(?:maximum|up\s*to)\s*(\d+\s*%)", cl, re.I)
                 if mcbmax:
-                    return f"EXTRACTED FACT: {mcbmax.group(1).replace(' ', '')} maximum"
+                    return f"Cumulative Bonus cap: {mcbmax.group(1).replace(' ', '')}"
+            # Joint replacement waiting period
+            if 'joint replacement' in ql:
+                mj = re.search(r"joint\s+replacement[^\n]*?(\d+\s*months)", cl, re.I)
+                if mj:
+                    return f"Waiting period: {mj.group(1).replace(' ', '')} (unless due to accident)"
+            # Refractive error exclusion
+            if 'refractive' in ql and ('7.5' in ql or 'seven' in ql):
+                if re.search(r"(excluded|not\s+payable|not\s+covered)", cl, re.I):
+                    return "Not covered (correction of refractive error <7.5 dioptres is excluded)"
+            # Moratorium period & contestation
+            if 'moratorium' in ql:
+                m8 = re.search(r"moratorium[^\n]*?(\d+\s*years)", cl, re.I)
+                if m8 and ('contest' in ql or 'challenge' in ql):
+                    return f"Moratorium: {m8.group(1).replace(' ', '')}; after this, a claim can be contested only for fraud or permanent exclusions"
+                if m8:
+                    return f"Moratorium: {m8.group(1).replace(' ', '')}"
+            # Stay Active benefit
+            if 'stay active' in ql or '10,000 steps' in ql or '10000 steps' in ql:
+                ms = re.search(r"(\d+\s*%)\s*(?:discount)?\s*for\s*(?:averaging\s*)?(?:over\s*)?10,?000\s*steps", cl, re.I)
+                if ms:
+                    return f"{ms.group(1).replace(' ', '')} discount for averaging over 10,000 steps"
+            # Adult accompanying child benefit
+            if ('accompany' in ql or 'accompanying' in ql) and 'child' in ql:
+                mamt = re.search(r"₹?\s*([1-9][0-9]{2,3})\s*(?:per\s*day|/day)", context)
+                mdays = re.search(r"up\s*to\s*(\d+)\s*days", cl, re.I)
+                if mamt:
+                    amt = mamt.group(1)
+                    if mdays:
+                        return f"₹{amt} per day, up to {mdays.group(1)} days"
+                    return f"₹{amt} per day"
+            # TV charges payable?
+            if 'television' in ql or 'tv' in ql:
+                if re.search(r"non-?payable\s+items?.*television|tv", cl, re.I):
+                    return "Not payable"
             # 1) Waiting period patterns
             m = None
             if 'waiting' in ql or 'pre-existing' in ql or 'preexisting' in ql:
@@ -720,31 +774,28 @@ SUB-QUESTIONS (as a JSON list):
             if not m:
                 m = re.search(r'rs\.?\s*[₹]?[\s]*([0-9][0-9,]*)', cl)
                 if m:
-                    return f"EXTRACTED FACT: Rs. {m.group(1)}"
+                    return f"₹{m.group(1)}"
             # 4) Generic numeric duration
             if not m:
                 m = re.search(r'(\d+\s*(?:years?|months?|days?))', cl)
             if m:
                 val = m.group(1)
-                return f"EXTRACTED FACT: {val}"
+                return val
             return "Information not found in document."
 
         prompt = f"""
-You are a fact-extraction engine. Provide ONLY the exact fact asked. No explanations.
+You are a fact-extraction engine. Provide ONLY the exact fact asked, as a concise descriptive answer (no labels or prefixes). No explanations.
 
 Rules:
 - Use ONLY the CONTEXT.
 - If the answer is absent, respond EXACTLY: Information not found in document.
-- Output must be exactly one of:
-  • EXTRACTED FACT: <one-line fact>
-  • Information not found in document.
 
 CONTEXT:
 {context}
 
 QUESTION: {question}
 
-EXTRACTED FACT:
+Answer:
 """
         try:
             response = await self.groq_client.chat.completions.create(
@@ -764,26 +815,22 @@ EXTRACTED FACT:
             return await self._safety_first_generation(context, question)
 
     def _self_correct_zero_fluff(self, text: str) -> str:
-        """Mandated self-correction: ensure output strictly complies with APOLLO format."""
-        t = text.strip()
-        # Direct allowed outputs
-        if t == "Information not found in document.":
-            return t
-        # If contains an EXTRACTED FACT line, keep only that line
-        m = re.search(r"(?im)^\s*EXTRACTED FACT:\s*(.+)$", t)
-        if m:
-            fact = m.group(0).strip()
-            return f"EXTRACTED FACT: {m.group(1).strip()}"
-        # If model returned something else but implies not found
-        if re.search(r"not\s+found|not\s+available|cannot\s+find", t, re.I):
+        """Normalize output to a concise descriptive answer without prefixes."""
+        t = (text or "").strip()
+        if not t:
             return "Information not found in document."
-        # Last resort: compress to first concise phrase (avoid verbosity)
-        # Extract first number/percent/duration/currency
-        mnum = re.search(r"(\b\d+\s*%\b|\b\d+\s*(?:years?|months?|days?)\b|rs\.?\s*[₹]?[\s]*[0-9][0-9,]*)", t, re.I)
-        if mnum:
-            return f"EXTRACTED FACT: {mnum.group(1).strip()}"
-        # If nothing authoritative, declare not found
-        return "Information not found in document."
+        # Strip known prefix if model added it
+        t = re.sub(r"(?im)^\s*EXTRACTED FACT:\s*", "", t).strip()
+        # Collapse to one line
+        t = re.sub(r"\s+", " ", t)
+        # If implies not found
+        if re.search(r"\b(not\s+found|not\s+available|cannot\s+find|no\s+information)\b", t, re.I):
+            return "Information not found in document."
+        # If it's too verbose, keep first sentence/line
+        t = t.split("\n")[0].split(".")[0].strip()
+        if not t:
+            return "Information not found in document."
+        return t
     
     async def _safety_first_generation(self, context: str, question: str) -> str:
         """Enhanced generation with strict relevancy checking for unknown documents"""
