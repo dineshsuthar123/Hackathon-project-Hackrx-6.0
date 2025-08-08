@@ -321,12 +321,11 @@ class GroqIntelligenceEngine:
             self.logger.info("📚 Engaging GENERALIZED RAG for new document comprehension")
 
             # PROTOCOL 7.2: Enhanced processing for unknown documents
-            return await self._generalized_rag_analysis(document_content, question, processor)
-
+            return await self._generalized_rag_analysis(document_content, question, processor, prefer_local=False)
         # For known documents, prefer fast RAG + local APOLLO for speed and accuracy
-        return await self._generalized_rag_analysis(document_content, question, processor)
+        return await self._generalized_rag_analysis(document_content, question, processor, prefer_local=True)
     
-    async def _generalized_rag_analysis(self, document_content: str, question: str, processor=None) -> str:
+    async def _generalized_rag_analysis(self, document_content: str, question: str, processor=None, prefer_local: bool = False) -> str:
         """
         PROTOCOL 7.2: Core Generalized RAG Pipeline for Unknown Targets
         
@@ -349,12 +348,19 @@ class GroqIntelligenceEngine:
         
         # Build or reuse prebuilt chunks
         prebuilt_chunks = None
+        prebuilt_index = None
         if processor and hasattr(processor, "_get_or_build_chunks"):
             try:
                 prebuilt_chunks = processor._get_or_build_chunks(document_content)
             except Exception as e:
                 self.logger.warning(f"⚠️ Prebuilt chunks unavailable: {e}")
                 prebuilt_chunks = None
+        if processor and hasattr(processor, "_get_or_build_bm25_index"):
+            try:
+                prebuilt_index = processor._get_or_build_bm25_index(document_content)
+            except Exception as e:
+                self.logger.warning(f"⚠️ BM25 index unavailable: {e}")
+                prebuilt_index = None
 
         # Decompose into sub-queries (ARTEMIS) with Intelligent Decomposition (Protocol 8.1/8.2)
         fast_mode = os.getenv("FAST_MODE", "1") == "1"
@@ -378,7 +384,7 @@ class GroqIntelligenceEngine:
 
         # Run parallel chunk extraction for each sub-query (HYPERION: mandatory parallelism)
         tasks = [
-            self._extract_precision_chunks(document_content, sq, prebuilt_chunks=prebuilt_chunks)
+            self._extract_precision_chunks(document_content, sq, prebuilt_chunks=prebuilt_chunks, prebuilt_index=prebuilt_index)
             for sq in sub_queries
         ]
 
@@ -387,7 +393,7 @@ class GroqIntelligenceEngine:
             results = await asyncio.gather(*tasks)
         except Exception as e:
             self.logger.warning(f"⚠️ Parallel extraction failed, falling back to single query: {e}")
-            results = [await self._extract_precision_chunks(document_content, question, prebuilt_chunks=prebuilt_chunks)]
+            results = [await self._extract_precision_chunks(document_content, question, prebuilt_chunks=prebuilt_chunks, prebuilt_index=prebuilt_index)]
 
         # Merge and dedupe chunks, keep top few
         merged = []
@@ -416,11 +422,10 @@ class GroqIntelligenceEngine:
 
         self.logger.info("🔄 STEP 3: ZERO-FLUFF GENERATION (APOLLO) - Minimal, precise answer")
         enhanced_context = "\n\n".join(relevant_chunks)
-        # Prefer local generation for known documents to minimize latency
-        prefer_local = True
+        # Prefer local generation only if indicated (known docs)
         return await self._zero_fluff_generation(enhanced_context, question, prefer_local=prefer_local)
     
-    async def _extract_precision_chunks(self, document_content: str, question: str, prebuilt_chunks: Optional[List[str]] = None) -> List[str]:
+    async def _extract_precision_chunks(self, document_content: str, question: str, prebuilt_chunks: Optional[List[str]] = None, prebuilt_index: Optional[Dict[str, Any]] = None) -> List[str]:
         """Enhanced chunk extraction using pure-Python BM25 ranking.
         If prebuilt_chunks are provided, reuse them to avoid re-splitting."""
         # Prepare chunks
@@ -433,37 +438,66 @@ class GroqIntelligenceEngine:
                 chunk = '. '.join(sentences[i:i+4]).strip()
                 if len(chunk) > 50:
                     chunks.append(chunk)
+        # Enforce chunk budget
+        chunk_budget = int(os.getenv("CHUNK_BUDGET", "1200"))
+        if len(chunks) > chunk_budget:
+            chunks = chunks[:chunk_budget]
 
-        # Tokenize
+        # Tokenize (retain short numbers like '17')
         def tok(text: str) -> List[str]:
             text = text.lower()
             text = re.sub(r"[^a-z0-9%₹$\s]", " ", text)
-            words = [w for w in text.split() if len(w) > 2]
+            parts = text.split()
+            words: List[str] = []
+            for w in parts:
+                if w.isdigit():
+                    words.append(w)
+                elif len(w) > 2:
+                    words.append(w)
             return words
 
-        doc_tokens = [tok(ch) for ch in chunks]
+        # Use prebuilt BM25 index if available
+        if prebuilt_index and prebuilt_index.get('chunks') is chunks:
+            doc_tokens = prebuilt_index['doc_tokens']
+            idf = prebuilt_index['idf']
+            avgdl = prebuilt_index['avgdl']
+        else:
+            doc_tokens = [tok(ch) for ch in chunks]
+            # Build DF/IDF
+            df: Dict[str, int] = {}
+            for toks in doc_tokens:
+                for t in set(toks):
+                    df[t] = df.get(t, 0) + 1
+            N = max(1, len(doc_tokens))
+            idf: Dict[str, float] = {t: math.log(1 + (N - dfi + 0.5) / (dfi + 0.5)) for t, dfi in df.items()}
+            avgdl = sum(len(toks) for toks in doc_tokens) / N
         N = len(doc_tokens)
         if N == 0:
             return []
         # BM25 parameters
         k1 = 1.5
         b = 0.75
-        # Average document length
-        avgdl = sum(len(toks) for toks in doc_tokens) / max(1, N)
-        # Document frequency
-        df: Dict[str, int] = {}
-        for toks in doc_tokens:
-            for t in set(toks):
-                df[t] = df.get(t, 0) + 1
-        # IDF
-        idf: Dict[str, float] = {}
-        for t, dfi in df.items():
-            idf[t] = math.log(1 + (N - dfi + 0.5) / (dfi + 0.5))
         # Query tokens
         q_tokens = tok(question)
-        # Score each chunk
-        scores: List[float] = []
-        for toks in doc_tokens:
+
+        # Prefilter candidates by cheap overlap to ~300
+        cand_indices: List[int] = []
+        qset = set(q_tokens)
+        for i, toks in enumerate(doc_tokens):
+            if qset & set(toks):
+                cand_indices.append(i)
+        if len(cand_indices) == 0:
+            cand_indices = list(range(N))
+        if len(cand_indices) > 300:
+            cand_indices = cand_indices[:300]
+        # Score each chunk with a time budget
+        t0 = time.time()
+        time_budget_ms = int(os.getenv("RETRIEVAL_TIME_BUDGET_MS", "1200"))
+        scores: List[float] = [0.0] * N
+        for i in cand_indices:
+            if (time.time() - t0) * 1000 > time_budget_ms:
+                break
+            toks = doc_tokens[i]
             score = 0.0
             dl = len(toks)
             tf_counts: Dict[str, int] = {}
@@ -475,7 +509,7 @@ class GroqIntelligenceEngine:
                 tf = tf_counts[qt]
                 denom = tf + k1 * (1 - b + b * dl / max(1.0, avgdl))
                 score += idf.get(qt, 0.0) * (tf * (k1 + 1)) / max(1e-8, denom)
-            scores.append(score)
+            scores[i] = score
 
         # Rank and take top-5
         ranked_indices = sorted(range(N), key=lambda i: scores[i], reverse=True)[:5]
@@ -624,9 +658,8 @@ SUB-QUESTIONS (as a JSON list):
 
     async def _zero_fluff_generation(self, context: str, question: str, prefer_local: bool = False) -> str:
         """APOLLO: Zero‑fluff fact extraction with mandated self-correction.
-        Output must be either:
-        - "EXTRACTED FACT: <fact>"
-        - "Information not found in document."
+    Output must be a concise descriptive answer or exactly:
+    - "Information not found in document."
         """
         # Prefer local path for speed when requested or when LLM unavailable
         if prefer_local or not self.groq_client:
@@ -654,7 +687,7 @@ SUB-QUESTIONS (as a JSON list):
                     mdef = re.search(p, cl)
                     if mdef:
                         val = mdef.group(1).strip().rstrip('.;')
-                        return f"EXTRACTED FACT: {val}"
+                        return val
             # Direct identifiers
             if 'uin' in ql or 'unique identification' in ql:
                 muin = re.search(r"\bUIN\b\s*[:\-]?\s*([A-Z0-9\-]+)", context, re.I)
@@ -1246,10 +1279,11 @@ class GroqDocumentProcessor:
         self.groq_engine = GroqIntelligenceEngine()
         self.mongodb_manager = MongoDBManager()
         self.logger = logging.getLogger(__name__)
-
         # KAIROS: L1 session cache and prebuilt chunks cache
         self.session_cache = {}
         self.chunks_cache = {}
+        # ARTEMIS: BM25 index cache per document content
+        self.bm25_index_cache = {}
 
         # KAIROS: Optional Redis L2 cache
         self.redis = None
@@ -1517,6 +1551,12 @@ class GroqDocumentProcessor:
         if key in self.chunks_cache:
             return self.chunks_cache[key]
         sentences = document_content.replace('\n', ' ').split('. ')
+        # Cap sentence processing to enforce a chunk budget
+        chunk_budget = int(os.getenv("CHUNK_BUDGET", "1200"))
+        # With window=4 and stride=2, roughly 2 sentences per chunk
+        max_sentences = max(200, chunk_budget * 2)
+        if len(sentences) > max_sentences:
+            sentences = sentences[:max_sentences]
         chunks: List[str] = []
         for i in range(0, len(sentences), 2):
             chunk = '. '.join(sentences[i:i+4]).strip()
@@ -1524,6 +1564,36 @@ class GroqDocumentProcessor:
                 chunks.append(chunk)
         self.chunks_cache[key] = chunks
         return chunks
+
+    def _get_or_build_bm25_index(self, document_content: str) -> Dict[str, Any]:
+        """Builds and caches a BM25 index aligned with the current chunking for a document."""
+        key = self._chunks_cache_key(document_content)
+        if key in self.bm25_index_cache:
+            return self.bm25_index_cache[key]
+        chunks = self._get_or_build_chunks(document_content)
+        # Tokenizer mirrored with retrieval path
+        def tok(text: str) -> List[str]:
+            text = text.lower()
+            text = re.sub(r"[^a-z0-9%₹$\s]", " ", text)
+            parts = text.split()
+            words: List[str] = []
+            for w in parts:
+                if w.isdigit():
+                    words.append(w)
+                elif len(w) > 2:
+                    words.append(w)
+            return words
+        doc_tokens = [tok(ch) for ch in chunks]
+        df: Dict[str, int] = {}
+        for toks in doc_tokens:
+            for t in set(toks):
+                df[t] = df.get(t, 0) + 1
+        N = max(1, len(doc_tokens))
+        idf: Dict[str, float] = {t: math.log(1 + (N - dfi + 0.5) / (dfi + 0.5)) for t, dfi in df.items()}
+        avgdl = sum(len(toks) for toks in doc_tokens) / N
+        index = {"chunks": chunks, "doc_tokens": doc_tokens, "idf": idf, "avgdl": avgdl}
+        self.bm25_index_cache[key] = index
+        return index
     
     async def _extract_clean_text(self, pdf_bytes: bytes) -> str:
         """MISSION-CRITICAL: Full PDF extraction for complete document ingestion"""
@@ -1540,13 +1610,23 @@ class GroqDocumentProcessor:
             try:
                 self.logger.info("🔄 EXTRACTING with PyPDF2 (Production Priority)...")
                 text_parts = []
+                max_pages = int(os.getenv("MAX_PAGES", "150"))
+                max_bytes = int(os.getenv("MAX_TEXT_BYTES", "800000"))
+                time_budget_ms = int(os.getenv("EXTRACT_TIME_BUDGET_MS", "8000"))
+                t0 = time.time()
                 
                 pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_bytes))
                 for page_num in range(len(pdf_reader.pages)):
+                    if page_num >= max_pages:
+                        break
+                    if (time.time() - t0) * 1000 > time_budget_ms:
+                        break
                     page = pdf_reader.pages[page_num]
                     page_text = page.extract_text()
                     if page_text.strip():
                         text_parts.append(page_text)
+                        if sum(len(p) for p in text_parts) > max_bytes:
+                            break
                 
                 extracted_text = "\n\n".join(text_parts)
                 
@@ -1562,12 +1642,22 @@ class GroqDocumentProcessor:
             try:
                 self.logger.info("🔄 EXTRACTING with pdfplumber...")
                 text_parts = []
+                max_pages = int(os.getenv("MAX_PAGES", "150"))
+                max_bytes = int(os.getenv("MAX_TEXT_BYTES", "800000"))
+                time_budget_ms = int(os.getenv("EXTRACT_TIME_BUDGET_MS", "8000"))
+                t0 = time.time()
                 
                 with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-                    for page in pdf.pages:
+                    for p_idx, page in enumerate(pdf.pages):
+                        if p_idx >= max_pages:
+                            break
+                        if (time.time() - t0) * 1000 > time_budget_ms:
+                            break
                         page_text = page.extract_text()
                         if page_text:
                             text_parts.append(page_text)
+                            if sum(len(p) for p in text_parts) > max_bytes:
+                                break
                 
                 extracted_text = "\n\n".join(text_parts)
                 
@@ -1584,12 +1674,22 @@ class GroqDocumentProcessor:
                 self.logger.info("🔄 EXTRACTING with PyMuPDF (Fallback)...")
                 doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                 text_parts = []
+                max_pages = int(os.getenv("MAX_PAGES", "150"))
+                max_bytes = int(os.getenv("MAX_TEXT_BYTES", "800000"))
+                time_budget_ms = int(os.getenv("EXTRACT_TIME_BUDGET_MS", "8000"))
+                t0 = time.time()
                 
                 for page_num in range(len(doc)):
+                    if page_num >= max_pages:
+                        break
+                    if (time.time() - t0) * 1000 > time_budget_ms:
+                        break
                     page = doc[page_num]
                     page_text = page.get_text()
                     if page_text.strip():
                         text_parts.append(page_text)
+                        if sum(len(p) for p in text_parts) > max_bytes:
+                            break
                 
                 doc.close()
                 extracted_text = "\n\n".join(text_parts)

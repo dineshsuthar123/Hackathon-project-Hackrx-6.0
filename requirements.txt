@@ -28,16 +28,16 @@ motor>=3.3.0                 # Async MongoDB driver (~2MB)
 httpx>=0.26.0                # Async HTTP client (~3MB)
 
 # =============================================================================
-# 📄 PDF PROCESSING (Ultra-Lightweight - ~3MB total)
+# 📄 PDF PROCESSING (Ultra-Lightweight)
 # =============================================================================
-PyPDF2==3.0.1               # Primary lightweight PDF parsing (~2MB)
-pdfplumber==0.10.3           # Secondary extraction (~1MB)
-# PyMuPDF (fitz) REMOVED - Too heavy for production (~15MB)
+PyPDF2==3.0.1               # Primary lightweight PDF parsing
+pdfplumber==0.10.3           # Secondary extraction
+# PyMuPDF (fitz) is OPTIONAL; not installed by default to stay light
 
 # =============================================================================
-# 📊 MINIMAL COMPUTATION (Essential - ~5MB)
+# 📊 MINIMAL COMPUTATION
 # =============================================================================
-numpy>=1.24.0,<2.0.0        # Essential numerical operations (~5MB)
+# No heavy numeric deps required (pure-Python BM25 retriever)
 
 # =============================================================================
 # 🧠 OPTIONAL L2 CACHE (Redis) - small footprint
