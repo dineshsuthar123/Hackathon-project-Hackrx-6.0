@@ -366,8 +366,26 @@ class GroqIntelligenceEngine:
                 self.logger.warning(f"⚠️ Prebuilt chunks unavailable: {e}")
                 prebuilt_chunks = None
 
-        # Decompose into sub-queries (ARTEMIS)
-        sub_queries = self._decompose_question(question)
+        # Decompose into sub-queries (ARTEMIS) with Intelligent Decomposition (Protocol 8.1/8.2)
+        if self.groq_client:
+            try:
+                should = await self._should_decompose(question)
+                if should:
+                    sub_queries = await self._semantic_decompose_question(question)
+                    # Ensure fallback to original question if parsing fails
+                    if not sub_queries:
+                        sub_queries = [question]
+                else:
+                    sub_queries = [question]
+            except Exception as e:
+                self.logger.warning(f"⚠️ Intelligent decomposition unavailable, using heuristic: {e}")
+                sub_queries = self._decompose_question(question)
+        else:
+            # Offline fallback: conservative behavior (no split for simple queries)
+            if len(question.strip()) < 12:
+                sub_queries = [question]
+            else:
+                sub_queries = self._decompose_question(question)
         self.logger.info(f"🧩 Sub-queries: {len(sub_queries)} -> {sub_queries}")
 
         # Run parallel chunk extraction for each sub-query (HYPERION: mandatory parallelism)
@@ -471,6 +489,91 @@ class GroqIntelligenceEngine:
                 seen.add(k)
                 uniq.append(s)
         return uniq[:3]
+
+    async def _should_decompose(self, question: str) -> bool:
+        """Protocol 8.1: Ask the model if decomposition is necessary. Returns True/False."""
+        if not self.groq_client:
+            # Lightweight heuristic when offline
+            ql = question.lower()
+            if len(question.split()) > 18:
+                return True
+            if any(k in ql for k in [" and ", ";", ",", " if ", " when ", " versus "]):
+                return True
+            return False
+        prompt = f"""
+You are a query analysis checker. Does the following question contain multiple, distinct informational queries that need to be answered separately? Respond with only 'Yes' or 'No'.
+
+QUESTION:
+{question}
+"""
+        try:
+            resp = await self.groq_client.chat.completions.create(
+                model=GROQ_FAST_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=3,
+                top_p=0.1,
+                stream=False,
+            )
+            ans = (resp.choices[0].message.content or "").strip().lower()
+            return ans.startswith("y")
+        except Exception as e:
+            self.logger.warning(f"⚠️ _should_decompose failed: {e}")
+            return False
+
+    async def _semantic_decompose_question(self, question: str) -> List[str]:
+        """Protocol 8.2: Ask the model to output a JSON list of complete sub-questions."""
+        if not self.groq_client:
+            return self._decompose_question(question)
+        prompt = f"""
+You are a query analysis expert. Decompose the following complex user question into a series of simple, self-contained sub-questions. Each sub-question must be a complete thought. Do not fragment numbers or proper nouns.
+
+COMPLEX QUESTION: {question}
+
+SUB-QUESTIONS (as a JSON list):
+"""
+        try:
+            resp = await self.groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=200,
+                top_p=0.1,
+                stream=False,
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            # Try direct JSON parse
+            subs: List[str] = []
+            try:
+                subs = json.loads(raw)
+                if not isinstance(subs, list):
+                    subs = []
+            except Exception:
+                # Extract JSON-like list from text
+                m = re.search(r"\[(.|\n|\r)*\]", raw)
+                if m:
+                    try:
+                        subs = json.loads(m.group(0))
+                    except Exception:
+                        subs = []
+            # Normalize strings, keep non-empty, cap to 3
+            cleaned: List[str] = []
+            seen = set()
+            for s in subs:
+                if isinstance(s, str):
+                    t = s.strip()
+                    if t and t.lower() not in seen:
+                        seen.add(t.lower())
+                        cleaned.append(t)
+                if len(cleaned) >= 3:
+                    break
+            # Always include the original question at the end if missing
+            if question not in cleaned:
+                cleaned.append(question)
+            return cleaned[:3]
+        except Exception as e:
+            self.logger.warning(f"⚠️ _semantic_decompose_question failed: {e}")
+            return self._decompose_question(question)
 
     async def _zero_fluff_generation(self, context: str, question: str) -> str:
         """APOLLO: Zero‑fluff fact extraction with mandated self-correction.
