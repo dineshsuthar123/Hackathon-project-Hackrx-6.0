@@ -4,7 +4,7 @@ Ultimate document analysis with ReAct multi-step reasoning
 Groq LPU + Advanced ReAct + Precision Document Analysis
 """
 
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Tuple
 import math
 import logging
 import hashlib
@@ -58,7 +58,7 @@ except ImportError:
 
 # PDF parsing - PRODUCTION MODE (Dynamic imports for robust extraction)
 try:
-    import fitz  # PyMuPDF
+    import fitz  # type: ignore  # PyMuPDF
     FITZ_AVAILABLE = True
 except ImportError:
     FITZ_AVAILABLE = False
@@ -334,19 +334,15 @@ class GroqIntelligenceEngine:
         2. Precision Retrieval (ARTEMIS) - sub-query decomposition + parallel re-ranking
         3. Zero-Fluff Generation (APOLLO) - minimal, precise, source-grounded
         """
-        
         self.logger.info("🔄 STEP 1: FULL INGESTION - Loading complete document")
-        
         # Validate document ingestion
         if not document_content or len(document_content.strip()) < 100:
             self.logger.error("❌ CRITICAL FAILURE: Document truncation detected")
             return "ERROR: Document could not be fully loaded. Please check the document URL and try again."
-        
         self.logger.info(f"✅ Document loaded: {len(document_content)} characters")
-        
+
         self.logger.info("🔄 STEP 2: PRECISION RETRIEVAL (ARTEMIS) - Decompose and parallel extract")
-        
-        # Build or reuse prebuilt chunks
+        # Build or reuse prebuilt chunks and BM25 index
         prebuilt_chunks = None
         prebuilt_index = None
         if processor and hasattr(processor, "_get_or_build_chunks"):
@@ -369,7 +365,6 @@ class GroqIntelligenceEngine:
                 should = await self._should_decompose(question)
                 if should:
                     sub_queries = await self._semantic_decompose_question(question)
-                    # Ensure fallback to original question if parsing fails
                     if not sub_queries:
                         sub_queries = [question]
                 else:
@@ -378,8 +373,13 @@ class GroqIntelligenceEngine:
                 self.logger.warning(f"⚠️ Intelligent decomposition unavailable, using heuristic: {e}")
                 sub_queries = self._decompose_question(question)
         else:
-            # Offline fallback: conservative behavior (no split for simple queries)
-            sub_queries = [question]
+            try:
+                if self._detect_complex_query(question):
+                    sub_queries = self._decompose_question(question)
+                else:
+                    sub_queries = [question]
+            except Exception:
+                sub_queries = [question]
         self.logger.info(f"🧩 Sub-queries: {len(sub_queries)} -> {sub_queries}")
 
         # Run parallel chunk extraction for each sub-query (HYPERION: mandatory parallelism)
@@ -387,8 +387,6 @@ class GroqIntelligenceEngine:
             self._extract_precision_chunks(document_content, sq, prebuilt_chunks=prebuilt_chunks, prebuilt_index=prebuilt_index)
             for sq in sub_queries
         ]
-
-        results = []
         try:
             results = await asyncio.gather(*tasks)
         except Exception as e:
@@ -396,7 +394,7 @@ class GroqIntelligenceEngine:
             results = [await self._extract_precision_chunks(document_content, question, prebuilt_chunks=prebuilt_chunks, prebuilt_index=prebuilt_index)]
 
         # Merge and dedupe chunks, keep top few
-        merged = []
+        merged: List[str] = []
         seen = set()
         for lst in results:
             for ch in lst:
@@ -405,14 +403,11 @@ class GroqIntelligenceEngine:
                     seen.add(key)
                     merged.append(ch)
         relevant_chunks = merged[:8]
-        
         if not relevant_chunks:
             self.logger.error("❌ CRITICAL FAILURE: No relevant content found")
             return "Information not found in document."
-        
+
         self.logger.info(f"✅ Relevant chunks extracted: {len(relevant_chunks)} chunks")
-        
-        # Optional retrieval trace
         if os.getenv("RETRIEVAL_TRACE", "0") == "1":
             try:
                 for i, ch in enumerate(relevant_chunks[:5], 1):
@@ -422,7 +417,6 @@ class GroqIntelligenceEngine:
 
         self.logger.info("🔄 STEP 3: ZERO-FLUFF GENERATION (APOLLO) - Minimal, precise answer")
         enhanced_context = "\n\n".join(relevant_chunks)
-        # Prefer local generation only if indicated (known docs)
         return await self._zero_fluff_generation(enhanced_context, question, prefer_local=prefer_local)
     
     async def _extract_precision_chunks(self, document_content: str, question: str, prebuilt_chunks: Optional[List[str]] = None, prebuilt_index: Optional[Dict[str, Any]] = None) -> List[str]:
@@ -433,13 +427,13 @@ class GroqIntelligenceEngine:
             chunks = prebuilt_chunks
         else:
             sentences = document_content.replace('\n', ' ').split('. ')
-            chunks = []
+            chunks: List[str] = []
             for i in range(0, len(sentences), 2):  # stride 2, window 4
                 chunk = '. '.join(sentences[i:i+4]).strip()
                 if len(chunk) > 50:
                     chunks.append(chunk)
         # Enforce chunk budget
-        chunk_budget = int(os.getenv("CHUNK_BUDGET", "1200"))
+        chunk_budget = int(os.getenv("CHUNK_BUDGET", "800"))
         if len(chunks) > chunk_budget:
             chunks = chunks[:chunk_budget]
 
@@ -455,6 +449,37 @@ class GroqIntelligenceEngine:
                 elif len(w) > 2:
                     words.append(w)
             return words
+
+        # Domain synonym expansion (lightweight)
+        SYN = {
+            "copayment": ["co-payment", "co pay", "copay"],
+            "co-payment": ["copayment", "co pay", "copay"],
+            "grace": ["grace period", "renewal grace"],
+            "ambulance": ["road ambulance", "ambulance charges"],
+            "icu": ["iccu", "intensive care"],
+            "room": ["room rent", "boarding", "nursing"],
+            "waiting": ["waiting period", "cooling period"],
+            "pre-hospitalisation": ["pre hospitalisation", "pre hospitalization", "pre-hospitalization"],
+            "post-hospitalisation": ["post hospitalisation", "post hospitalization", "post-hospitalization"],
+        }
+
+        def expand_terms(tokens: List[str]) -> List[str]:
+            out = list(tokens)
+            for t in tokens:
+                if t in SYN:
+                    out.extend(SYN[t])
+            # Normalize expansions via tok to keep consistent token space
+            norm: List[str] = []
+            for x in out:
+                norm.extend(tok(x))
+            # Deduplicate but keep simple order
+            seen = set()
+            res: List[str] = []
+            for x in norm:
+                if x not in seen:
+                    seen.add(x)
+                    res.append(x)
+            return res
 
         # Use prebuilt BM25 index if available
         if prebuilt_index and prebuilt_index.get('chunks') is chunks:
@@ -478,7 +503,7 @@ class GroqIntelligenceEngine:
         k1 = 1.5
         b = 0.75
         # Query tokens
-        q_tokens = tok(question)
+        q_tokens = expand_terms(tok(question))
 
         # Prefilter candidates by cheap overlap to ~300
         cand_indices: List[int] = []
@@ -511,13 +536,24 @@ class GroqIntelligenceEngine:
                 score += idf.get(qt, 0.0) * (tf * (k1 + 1)) / max(1e-8, denom)
             scores[i] = score
 
-        # Rank and take top-5
-        ranked_indices = sorted(range(N), key=lambda i: scores[i], reverse=True)[:5]
-        top_chunks = [chunks[i] for i in ranked_indices if scores[i] > 0]
+        # Rank and include neighbors; take top-5 primary
+        primary = sorted(range(N), key=lambda i: scores[i], reverse=True)[:5]
+        selected: List[int] = []
+        seen_idx = set()
+        for i in primary:
+            if scores[i] <= 0:
+                continue
+            for j in (i - 1, i, i + 1):
+                if 0 <= j < N and j not in seen_idx:
+                    seen_idx.add(j)
+                    selected.append(j)
+        # Keep at most 8 chunks total
+        selected = selected[:8]
+        top_chunks = [chunks[i] for i in selected]
         if not top_chunks:
             # Fallback 1: pick chunks containing any query token as substring
             qset = set(q_tokens)
-            cand = []
+            cand: List[tuple[int, int]] = []
             for idx, ch in enumerate(chunks):
                 chl = ch.lower()
                 hit = any(qt in chl for qt in qset)
@@ -1552,7 +1588,7 @@ class GroqDocumentProcessor:
             return self.chunks_cache[key]
         sentences = document_content.replace('\n', ' ').split('. ')
         # Cap sentence processing to enforce a chunk budget
-        chunk_budget = int(os.getenv("CHUNK_BUDGET", "1200"))
+        chunk_budget = int(os.getenv("CHUNK_BUDGET", "800"))
         # With window=4 and stride=2, roughly 2 sentences per chunk
         max_sentences = max(200, chunk_budget * 2)
         if len(sentences) > max_sentences:
