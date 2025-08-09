@@ -86,6 +86,20 @@ except Exception:
     aioredis = None  # type: ignore
     REDIS_AVAILABLE = False
 
+# Optional OCR (Tesseract) for image-only or low-text PDFs
+try:
+    import pytesseract  # type: ignore
+    from PIL import Image  # type: ignore
+    OCR_AVAILABLE = True
+    # Optional override for tesseract binary path (Windows)
+    tess_cmd = os.getenv("TESSERACT_CMD")
+    if tess_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tess_cmd
+except Exception:
+    pytesseract = None  # type: ignore
+    Image = None  # type: ignore
+    OCR_AVAILABLE = False
+
 # Load environment variables
 load_dotenv()
 
@@ -1740,7 +1754,53 @@ class GroqDocumentProcessor:
         # METHOD 3: PyPDF2 (Backup - Already processed above)
         # Skipping duplicate PyPDF2 processing
         
-        # FINAL FALLBACK: If all methods fail
+        # METHOD 4: OCR via PyMuPDF rendering + Tesseract (for scanned/image PDFs)
+        # Trigger OCR if previous methods yielded too little text
+        try_ocr = (not extracted_text or len(extracted_text) < 1000)
+        ocr_enabled = os.getenv("ENABLE_OCR", "1") == "1"
+        if try_ocr and ocr_enabled and FITZ_AVAILABLE and fitz and OCR_AVAILABLE and pytesseract:
+            try:
+                self.logger.info("🔄 EXTRACTING with OCR (PyMuPDF render + Tesseract)...")
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                text_parts: List[str] = []
+                max_pages = int(os.getenv("OCR_MAX_PAGES", os.getenv("MAX_PAGES", "100")))
+                max_bytes = int(os.getenv("MAX_TEXT_BYTES", "800000"))
+                time_budget_ms = int(os.getenv("OCR_TIME_BUDGET_MS", "12000"))
+                dpi = int(os.getenv("OCR_DPI", "200"))
+                lang = os.getenv("OCR_LANG", "eng")
+                tess_cfg = os.getenv("TESSERACT_CONFIG", "--oem 1 --psm 6")
+                zoom = max(1.0, dpi / 72.0)
+                mat = fitz.Matrix(zoom, zoom)
+                t0 = time.time()
+
+                for page_num in range(len(doc)):
+                    if page_num >= max_pages:
+                        break
+                    if (time.time() - t0) * 1000 > time_budget_ms:
+                        break
+                    page = doc[page_num]
+                    try:
+                        # Render full page to image and OCR
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        img_bytes = pix.tobytes("png")
+                        pil_img = Image.open(BytesIO(img_bytes))
+                        page_text = pytesseract.image_to_string(pil_img, lang=lang, config=tess_cfg)
+                        if page_text and page_text.strip():
+                            text_parts.append(page_text)
+                            if sum(len(p) for p in text_parts) > max_bytes:
+                                break
+                    except Exception as pe:
+                        self.logger.debug(f"OCR page {page_num} failed: {pe}")
+
+                doc.close()
+                ocr_text = "\n\n".join(text_parts)
+                if len(ocr_text) > max(len(extracted_text), 800):
+                    self.logger.info(f"✅ OCR SUCCESS: {len(ocr_text)} characters extracted")
+                    return self._sanitize_text(ocr_text)
+            except Exception as e:
+                self.logger.error(f"❌ OCR extraction failed: {e}")
+
+        # FINAL FALLBACK: If all methods fail or OCR disabled/unavailable
         if not extracted_text or len(extracted_text) < 500:
             self.logger.error("❌ ALL PDF EXTRACTION METHODS FAILED - Using enhanced fallback")
             return self._get_enhanced_fallback_content()
@@ -2050,7 +2110,9 @@ async def health_check():
         "parsers": {
             "fitz_available": FITZ_AVAILABLE,
             "pdfplumber_available": PDFPLUMBER_AVAILABLE,
-            "pypdf2_available": PYPDF2_AVAILABLE
+            "pypdf2_available": PYPDF2_AVAILABLE,
+            "ocr_available": OCR_AVAILABLE,
+            "ocr_enabled": os.getenv("ENABLE_OCR", "1") == "1"
         },
         "intelligence_features": [
             "Document surgical analysis",
