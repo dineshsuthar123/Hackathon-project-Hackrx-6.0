@@ -372,28 +372,11 @@ class GroqIntelligenceEngine:
                 self.logger.warning(f"⚠️ BM25 index unavailable: {e}")
                 prebuilt_index = None
 
-        # Decompose into sub-queries (ARTEMIS) with Intelligent Decomposition (Protocol 8.1/8.2)
-        fast_mode = os.getenv("FAST_MODE", "1") == "1"
-        if self.groq_client and not fast_mode:
-            try:
-                should = await self._should_decompose(question)
-                if should:
-                    sub_queries = await self._semantic_decompose_question(question)
-                    if not sub_queries:
-                        sub_queries = [question]
-                else:
-                    sub_queries = [question]
-            except Exception as e:
-                self.logger.warning(f"⚠️ Intelligent decomposition unavailable, using heuristic: {e}")
-                sub_queries = self._decompose_question(question)
-        else:
-            try:
-                if self._detect_complex_query(question):
-                    sub_queries = self._decompose_question(question)
-                else:
-                    sub_queries = [question]
-            except Exception:
-                sub_queries = [question]
+        # Always decompose for max recall
+        try:
+            sub_queries = self._decompose_question(question)
+        except Exception:
+            sub_queries = [question]
         self.logger.info(f"🧩 Sub-queries: {len(sub_queries)} -> {sub_queries}")
 
         # Run parallel chunk extraction for each sub-query (HYPERION: mandatory parallelism)
@@ -407,7 +390,7 @@ class GroqIntelligenceEngine:
             self.logger.warning(f"⚠️ Parallel extraction failed, falling back to single query: {e}")
             results = [await self._extract_precision_chunks(document_content, question, prebuilt_chunks=prebuilt_chunks, prebuilt_index=prebuilt_index)]
 
-        # Merge and dedupe chunks, keep top few
+        # Merge and dedupe all chunks from all sub-queries
         merged: List[str] = []
         seen = set()
         for lst in results:
@@ -416,20 +399,29 @@ class GroqIntelligenceEngine:
                 if key not in seen:
                     seen.add(key)
                     merged.append(ch)
-        relevant_chunks = merged[:8]
+        # Expand: keep more chunks for synthesis
+        relevant_chunks = merged[:12]
+        # Soft fallback: if still empty, do substring search for question keywords
+        if not relevant_chunks:
+            qwords = [w for w in question.lower().split() if len(w) > 3]
+            for ch in (prebuilt_chunks or []):
+                if any(qw in ch.lower() for qw in qwords):
+                    relevant_chunks.append(ch)
+            relevant_chunks = relevant_chunks[:6]
         if not relevant_chunks:
             self.logger.error("❌ CRITICAL FAILURE: No relevant content found")
             return "Information not found in document."
 
         self.logger.info(f"✅ Relevant chunks extracted: {len(relevant_chunks)} chunks")
-        if os.getenv("RETRIEVAL_TRACE", "0") == "1":
-            try:
-                for i, ch in enumerate(relevant_chunks[:5], 1):
-                    self.logger.info(f"🔎 TOP{i} >> {ch[:300].replace('\n',' ')}")
-            except Exception:
-                pass
+        # Always enable retrieval trace for debugging
+        try:
+            for i, ch in enumerate(relevant_chunks[:8], 1):
+                self.logger.info(f"🔎 TOP{i} >> {ch[:300].replace('\n',' ')}")
+        except Exception:
+            pass
 
         self.logger.info("🔄 STEP 3: ZERO-FLUFF GENERATION (APOLLO) - Minimal, precise answer")
+        # Synthesize answer from all relevant chunks
         enhanced_context = "\n\n".join(relevant_chunks)
         return await self._zero_fluff_generation(enhanced_context, question, prefer_local=prefer_local)
     
@@ -550,8 +542,8 @@ class GroqIntelligenceEngine:
                 score += idf.get(qt, 0.0) * (tf * (k1 + 1)) / max(1e-8, denom)
             scores[i] = score
 
-        # Rank and include neighbors; take top-5 primary
-        primary = sorted(range(N), key=lambda i: scores[i], reverse=True)[:5]
+        # Rank and include neighbors; take top-8 primary
+        primary = sorted(range(N), key=lambda i: scores[i], reverse=True)[:8]
         selected: List[int] = []
         seen_idx = set()
         for i in primary:
@@ -561,8 +553,8 @@ class GroqIntelligenceEngine:
                 if 0 <= j < N and j not in seen_idx:
                     seen_idx.add(j)
                     selected.append(j)
-        # Keep at most 8 chunks total
-        selected = selected[:8]
+        # Keep at most 12 chunks total
+        selected = selected[:12]
         top_chunks = [chunks[i] for i in selected]
         if not top_chunks:
             # Fallback 1: pick chunks containing any query token as substring
