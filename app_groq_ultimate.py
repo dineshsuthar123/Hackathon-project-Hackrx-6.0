@@ -585,7 +585,7 @@ class GroqIntelligenceEngine:
             return [q]
 
         # Base split on conjunctions
-        parts = re.split(r"\b(?:and|also|as well as|plus|,|;|&)\b", q, maxsplit=2, flags=re.IGNORECASE)
+        parts = re.split(r"\b(?:and|also|as well as|plus|,|;|&)\b", q, maxsplit=3, flags=re.IGNORECASE)
         subs = [p.strip() for p in parts if len(p.strip()) > 0]
 
         ql = q.lower()
@@ -598,6 +598,18 @@ class GroqIntelligenceEngine:
                 subs.insert(0, f"waiting period for {topic}")
             # Add exception sub-query
             subs.append("waiting period exception for accidents")
+
+        # Include synonyms pivots
+        if 'copay' in ql or 'co pay' in ql:
+            subs.append(q.replace('copay', 'co-payment'))
+        if 'pre existing' in ql or 'pre-existing' in ql or 'ped' in ql:
+            subs.append("waiting period for pre-existing diseases")
+        if 'ambulance' in ql and 'limit' not in ql and 'charges' not in ql:
+            subs.append("ambulance charges limit per hospitalization")
+        if 'cashless' in ql:
+            subs.append("cashless facility requirements and process")
+        if 'day care' in ql or 'daycare' in ql:
+            subs.append("day care procedures coverage")
 
         # Ensure original question is included
         if q not in subs:
@@ -1128,27 +1140,22 @@ ANSWER:"""
         
         # Truncate document if too long but keep relevant sections
         if len(document_content) > 4000:
-            # Try to find the most relevant section
+            # Score paragraphs by keyword overlap and keep the best few
             question_keywords = re.findall(r'\b\w{4,}\b', question.lower())
-            
-            # Split document into sections
-            sections = document_content.split('\n\n')
-            scored_sections = []
-            
-            for section in sections:
-                section_lower = section.lower()
-                score = sum(1 for keyword in question_keywords if keyword in section_lower)
+            sections = [s.strip() for s in document_content.split('\n\n') if s.strip()]
+            scored: List[tuple[int, str]] = []
+            for s in sections:
+                sl = s.lower()
+                score = sum(1 for kw in question_keywords if kw in sl)
                 if score > 0:
-                    scored_sections.append((section, score))
-            
-            # Sort by relevance and take top sections
-            scored_sections.sort(key=lambda x: x[1], reverse=True)
-            relevant_content = '\n\n'.join([section for section, score in scored_sections[:5]])
-            
-            if len(relevant_content) > 3000:
-                relevant_content = relevant_content[:3000] + "..."
-            
-            document_content = relevant_content
+                    scored.append((score, s))
+            if scored:
+                scored.sort(key=lambda x: x[0], reverse=True)
+                # keep top 3 sections
+                document_content = '\n\n'.join([s for _, s in scored[:3]])
+            else:
+                # Fallback: keep the first ~4000 chars
+                document_content = document_content[:4000]
         
         prompt = f"""DOCUMENT TO ANALYZE:
 {document_content}
@@ -1165,7 +1172,7 @@ TASK: Analyze the document and provide the EXACT answer to the question. Look fo
 Provide a clear, concise, and completely accurate answer based ONLY on what is explicitly stated in the document."""
 
         return prompt
-    
+
     async def _local_intelligent_analysis(self, document_content: str, question: str) -> str:
         """Local intelligent analysis fallback"""
         self.logger.info("🔄 Using local intelligent analysis")
@@ -1206,9 +1213,8 @@ Provide a clear, concise, and completely accurate answer based ONLY on what is e
                     match = re.search(pattern, content_lower)
                     if match:
                         return f"The waiting period for pre-existing diseases is {match.group(1)} years."
-        
         # 2. CO-PAYMENT PRECISION
-        elif any(word in question_lower for word in ['co-payment', 'copayment']):
+        elif any(word in question_lower for word in ['co-payment', 'copayment', 'copay', 'co pay']):
             if '76' in question_lower or '75' in question_lower or 'greater than 75' in question_lower:
                 match = re.search(r'(?:greater than 75|above 75|over 75).*?(\d+)%', content_lower)
                 if match:
@@ -1217,14 +1223,12 @@ Provide a clear, concise, and completely accurate answer based ONLY on what is e
             elif any(age in question_lower for age in ['61', '70', '65']):
                 match = re.search(r'61.*?75.*?(\d+)%', content_lower)
                 if match:
-                    return f"The co-payment for persons aged 61-75 years is {match.group(1)}% on all claims."
-        
+                    return f"The co-payment for age group 61–75 years is {match.group(1)}%."
         # 3. GRACE PERIOD PRECISION
         elif 'grace' in question_lower and 'premium' in question_lower:
             patterns = [
                 r'grace period.*?(\d+)\s*days',
                 r'grace.*?(\d+)\s*days',
-                r'thirty days.*?grace'
             ]
             for pattern in patterns:
                 match = re.search(pattern, content_lower)
@@ -1233,7 +1237,6 @@ Provide a clear, concise, and completely accurate answer based ONLY on what is e
                         return "The grace period for premium payment is 30 days."
                     else:
                         return f"The grace period for premium payment is {match.group(1)} days."
-        
         # 4. NOTIFICATION REQUIREMENTS
         elif any(word in question_lower for word in ['notification', 'notify', 'notice']) and 'hospitalization' in question_lower:
             patterns = [
@@ -1257,17 +1260,11 @@ Provide a clear, concise, and completely accurate answer based ONLY on what is e
                 if match:
                     amount = match.group(1).replace(',', '')
                     return f"Road ambulance expenses are covered up to Rs. {amount} per hospitalization."
-        
-        # 6. AGE LIMITS
-        elif any(word in question_lower for word in ['age', 'dependent', 'children']):
-            patterns = [
-                r'dependent.*?(\d+)\s*months.*?(\d+)\s*years',
-                r'children.*?(\d+)\s*months.*?(\d+)\s*years'
-            ]
-            for pattern in patterns:
-                match = re.search(pattern, content_lower)
-                if match:
-                    return f"The age range for dependent children is {match.group(1)} months to {match.group(2)} years."
+        # 6. DEPENDENT CHILDREN AGE
+        elif 'dependent' in question_lower and ('child' in question_lower or 'children' in question_lower):
+            match = re.search(r'(\d+)\s*months\s*to\s*(\d+)\s*years', content_lower)
+            if match:
+                return f"The age range for dependent children is {match.group(1)} months to {match.group(2)} years."
         
         # 7. ROOM RENT / ICU COVERAGE
         elif 'room rent' in question_lower:

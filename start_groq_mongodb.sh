@@ -10,3 +10,4 @@ PORT_TO_USE="${PORT:-8000}"
 
 # Start FastAPI via Uvicorn using the app exported in app.py (which re-exports from app_groq_ultimate.py)
 exec python -m uvicorn app:app --host "$HOST" --port "$PORT_TO_USE" --proxy-headers --forwarded-allow-ips="*"
+c
